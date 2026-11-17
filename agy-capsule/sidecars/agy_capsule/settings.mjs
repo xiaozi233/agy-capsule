@@ -12,6 +12,7 @@ const DEFAULTS = {
   contextSide: 'left',
   speedSide: 'left',
   quotaSide: 'left',
+  order: ['context', 'speed', 'quota'],
 };
 
 export function dataDir() {
@@ -28,6 +29,7 @@ function settingsPath() {
 function normalize(raw) {
   const s = raw || {};
   const side = (v) => (v === 'right' ? 'right' : 'left');
+  const order = Array.isArray(s.order) ? s.order.filter((key) => DEFAULTS.order.includes(key)) : [];
   return {
     context: s.context !== false,
     speed: s.speed !== false,
@@ -36,10 +38,17 @@ function normalize(raw) {
     contextSide: side(s.contextSide),
     speedSide: side(s.speedSide),
     quotaSide: side(s.quotaSide),
+    order: [...new Set([...order, ...DEFAULTS.order])],
   };
 }
 
 let cache = null;
+const listeners = new Set();
+
+export function onSettingsChange(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 export function getSettings() {
   if (cache) return cache;
@@ -55,6 +64,7 @@ export function getSettings() {
 
 export function saveSettings(patch) {
   const next = normalize({ ...getSettings(), ...(patch || {}) });
+  if (JSON.stringify(next) === JSON.stringify(cache)) return cache;
   try {
     mkdirSync(dataDir(), { recursive: true });
     writeFileSync(settingsPath(), JSON.stringify(next, null, 2) + '\n');
@@ -63,5 +73,8 @@ export function saveSettings(patch) {
     throw e;
   }
   cache = next;
+  for (const listener of listeners) {
+    try { listener(next); } catch (e) { console.error('[settings] update failed:', e.message); }
+  }
   return next;
 }

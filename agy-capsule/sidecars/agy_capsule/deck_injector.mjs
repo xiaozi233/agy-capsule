@@ -3,10 +3,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { getSettings } from './settings.mjs';
+import { getSettings, onSettingsChange } from './settings.mjs';
 
 const INTERVAL_MS = 1000;
 const INSTANCE_TS = Date.now();
+const MOUNT_KEY = '__deckMount_' + INSTANCE_TS;
 const PORT_FILE =
   process.platform === 'darwin'
     ? join(homedir(), 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort')
@@ -56,21 +57,23 @@ async function connect(target) {
       }
     } catch {}
   };
-  ws.onclose = () => sockets.delete(target.id);
+  ws.onclose = () => { if (sockets.get(target.id) === entry) sockets.delete(target.id); };
   sockets.set(target.id, entry);
   return entry;
 }
 
 function evaluate(entry, expression) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const id = entry.nextId++;
     const t = setTimeout(() => {
       entry.pending.delete(id);
-      resolve(undefined);
+      reject(new Error('CDP evaluation timeout'));
     }, 3000);
     entry.pending.set(id, (msg) => {
       clearTimeout(t);
-      resolve(msg?.result?.result?.value);
+      const error = msg.error?.message || msg.result?.exceptionDetails?.exception?.description || msg.result?.exceptionDetails?.text;
+      if (error) reject(new Error(error));
+      else resolve(msg?.result?.result?.value);
     });
     entry.ws.send(
       JSON.stringify({
@@ -111,23 +114,42 @@ function pageMount(d) {
   const settingsKey = JSON.stringify(d.settings || {});
   const settingsChanged = root._settingsKey !== settingsKey;
   const previousCapsules = new Map();
+  const snapshotPill = (pill) => {
+    const clone = pill.cloneNode(true);
+    const copies = clone.querySelectorAll('.dk-val, .dk-q-pair');
+    pill.querySelectorAll('.dk-val, .dk-q-pair').forEach((el, index) => {
+      // Exit snapshots leave their strip, so preserve any readouts hidden by
+      // settings or responsive classes instead of briefly showing them again.
+      if (getComputedStyle(el).display === 'none') copies[index].style.display = 'none';
+    });
+    return clone;
+  };
   if (settingsChanged) {
+    // Read all current visual positions before cancelling any motion. A new
+    // destination continues from the frame on screen, including a fading exit.
     for (const strip of [root, rootR]) {
       for (const grp of strip.querySelectorAll('.dk-grp')) {
         const pill = grp.querySelector('.dk-pill');
         const rect = pill.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) previousCapsules.set(grp.dataset.el, { rect, pill: pill.cloneNode(true) });
-        for (const animation of pill.getAnimations()) animation.cancel();
+        if (rect.width > 0 && rect.height > 0) previousCapsules.set(grp.dataset.el, { rect, opacity: getComputedStyle(pill).opacity, pill: snapshotPill(pill) });
       }
     }
+    for (const ghost of root._animationLayer?.children || []) {
+      if (!previousCapsules.has(ghost.dataset.dkKey)) previousCapsules.set(ghost.dataset.dkKey, { rect: ghost.getBoundingClientRect(), opacity: getComputedStyle(ghost).opacity, pill: ghost.cloneNode(true) });
+    }
+    for (const pill of [...root.querySelectorAll('.dk-pill'), ...rootR.querySelectorAll('.dk-pill')]) {
+      pill._deckMotion?.cancel();
+      pill.style.willChange = '';
+    }
+    for (const ghost of root._animationLayer?.children || []) for (const motion of ghost.getAnimations()) motion.cancel();
     root._animationLayer?.replaceChildren();
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '52' || rootR.getAttribute('data-deck-ver') !== '52') {
+  if (root.getAttribute('data-deck-ver') !== '53' || rootR.getAttribute('data-deck-ver') !== '53') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '52');
-    rootR.setAttribute('data-deck-ver', '52');
+    root.setAttribute('data-deck-ver', '53');
+    rootR.setAttribute('data-deck-ver', '53');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -626,10 +648,11 @@ function pageMount(d) {
       </div>
     `;
 
-    // The right strip mirrors the markup; the shared <style> lives in the left
-    // one, and style elements apply document-wide wherever they sit.
+    // Keep one live node per capsule so moving it preserves listeners and state.
+    // Each strip owns a separator; the shared stylesheet stays in the left strip.
     rootR.style.cssText = root.style.cssText;
-    rootR.innerHTML = root.innerHTML.replace(/<style>[\s\S]*?<\/style>/, '');
+    rootR.innerHTML = '<div class="dk-sep"></div>';
+    root._capsules = new Map(['context', 'speed', 'quota'].map((key) => [key, root.querySelector('[data-el="' + { context: 'grpCtx', speed: 'grpSpeed', quota: 'grpQuota' }[key] + '"]')]));
 
     const closePopover = () => {
       clearTimeout(root._openTimer);
@@ -723,12 +746,13 @@ function pageMount(d) {
       window.removeEventListener('scroll', reposition, true);
       root._animationLayer?.remove();
       root._animationLayer = null;
+      for (const grp of root._capsules?.values() || []) grp.querySelector('.dk-pill')._deckMotion?.cancel();
     };
   }
   root._footer = footer;
   if (settingsChanged) root._closePopover();
 
-  // Settings arrive with every poll from the sidecar's settings.json.
+  // Settings arrive immediately after a save and with each telemetry refresh.
   const st = d.settings || {};
   const onCtx = st.context !== false;
   const onSpeed = st.speed !== false;
@@ -740,6 +764,21 @@ function pageMount(d) {
     speed: sideOf(st.speedSide),
     quota: sideOf(st.quotaSide),
   };
+  const layoutKeys = ['context', 'speed', 'quota'];
+  const order = [...new Set([...(Array.isArray(st.order) ? st.order.filter(key => layoutKeys.includes(key)) : []), ...layoutKeys])];
+  const sideFor = (key) => key === 'context' ? pos.ctx : pos[key];
+  for (const [strip, side] of [[root, 'left'], [rootR, 'right']]) {
+    const groups = order.filter(key => sideFor(key) === side).map(key => root._capsules.get(key));
+    const separator = strip.querySelector('.dk-sep');
+    // Reconcile only changed slots; unchanged telemetry updates never move DOM.
+    groups.forEach((grp, index) => {
+      const current = Array.from(strip.children).filter(el => el.classList.contains('dk-grp'));
+      if (current[index] !== grp) strip.insertBefore(grp, current[index] || null);
+    });
+    const quotaIndex = groups.indexOf(root._capsules.get('quota'));
+    const following = quotaIndex === 0 ? groups[1] : groups[quotaIndex];
+    if (following && separator.nextElementSibling !== following) strip.insertBefore(separator, following);
+  }
 
   for (const el of [root, rootR]) {
     el.classList.toggle('dk-off-ctx', !onCtx);
@@ -803,7 +842,7 @@ function pageMount(d) {
 
   const strips = [root, rootR];
   const setK = (k, val) => {
-    // Both strips carry the same markup, so update every copy.
+    // Capsules move between strips; update their current owner.
     for (const strip of strips) {
       for (const el of strip.querySelectorAll(`[data-k="${k}"]`)) {
         if (el.textContent !== val) el.textContent = val;
@@ -965,7 +1004,7 @@ function pageMount(d) {
     }
   }
 
-  // Update progress bar & cache cooling indicator (both strips carry a copy)
+  // Update progress bar & cache cooling indicator in the owning strip.
   for (const strip of strips) {
     const segRead = strip.querySelector('[data-el="segRead"]');
     const segOut = strip.querySelector('[data-el="segOut"]');
@@ -1012,11 +1051,15 @@ function pageMount(d) {
         const previous = previousCapsules.get(grp.dataset.el);
         const dx = previous ? previous.rect.left - rect.left : 0;
         const dy = previous ? previous.rect.top - rect.top : 3;
-        if (!previous || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 || Math.abs(previous.rect.width - rect.width) > 0.5) {
-          pill.animate([
-            { opacity: previous ? 1 : 0, transform: `translate(${dx}px, ${dy}px)` },
+        if (!previous || Number(previous.opacity) < 1 || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          pill.style.willChange = 'transform, opacity';
+          const motion = pill.animate([
+            { opacity: previous ? previous.opacity : 0, transform: `translate3d(${dx}px, ${dy}px, 0)` },
             { opacity: 1, transform: 'none' },
-          ], { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+          ], { duration: 160, easing: 'cubic-bezier(0.2, 0.65, 0.3, 1)' });
+          pill._deckMotion = motion;
+          const finish = () => { if (pill._deckMotion === motion) { pill.style.willChange = ''; pill._deckMotion = null; } };
+          motion.finished.then(finish, finish);
         }
       }
     }
@@ -1024,6 +1067,7 @@ function pageMount(d) {
       if (visible.has(key)) continue;
       const ghost = previous.pill;
       ghost.dataset.dkGhost = '';
+      ghost.dataset.dkKey = key;
       ghost.removeAttribute('aria-expanded');
       ghost.removeAttribute('id');
       ghost.setAttribute('aria-hidden', 'true');
@@ -1046,8 +1090,9 @@ function pageMount(d) {
       layer.style.fontWeight = controlStyle.fontWeight;
       layer.style.lineHeight = controlStyle.lineHeight;
       layer.style.color = controlStyle.color;
+      for (const prop of ['--dk-control-height', '--dk-control-padding', '--dk-control-radius', '--dk-icon-size']) layer.style.setProperty(prop, root.style.getPropertyValue(prop));
       layer.appendChild(ghost);
-      const animation = ghost.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(3px)' }], { duration: 120, easing: 'ease-out' });
+      const animation = ghost.animate([{ opacity: previous.opacity }, { opacity: 0, transform: 'translateY(3px)' }], { duration: 120, easing: 'ease-out' });
       animation.finished.then(() => ghost.remove(), () => ghost.remove());
     }
   }
@@ -1248,7 +1293,30 @@ function toView(d) {
   };
 }
 
-async function tick(inspect) {
+function render(entry, view) {
+  entry.view = view;
+  entry.renderPending = true;
+  if (entry.rendering) return entry.rendering;
+  entry.rendering = (async () => {
+    while (entry.renderPending) {
+      entry.renderPending = false;
+      // Always use the latest settings, even when an older telemetry read or
+      // renderer update was already in flight when the user clicked.
+      const argument = JSON.stringify({ ...entry.view, settings: getSettings() });
+      const key = JSON.stringify(MOUNT_KEY);
+      let res = await evaluate(entry, `typeof window[${key}]==='function'?window[${key}](${argument}):'needs-install'`);
+      if (res === 'needs-install') {
+        // Compile once per renderer document; routine updates send only data.
+        res = await evaluate(entry, `(window[${key}]=(${pageMount.toString()}))(${argument})`);
+      }
+      if (res === 'superseded') process.exit(0);
+      if (res?.startsWith('ok')) lastErr = '';
+    }
+  })().finally(() => { entry.rendering = null; });
+  return entry.rendering;
+}
+
+async function tick(inspect, isActive) {
   const port = readCdpPort();
   if (!port) return logOnce('DevToolsActivePort not found');
   let targets;
@@ -1261,17 +1329,15 @@ async function tick(inspect) {
     (t) => t.type === 'page' && /^https?:\/\/127\.0\.0\.1/.test(t.url || '') && t.webSocketDebuggerUrl
   );
   for (const t of pages) {
+    if (!isActive()) return;
     try {
       const entry = sockets.get(t.id) || (await connect(t));
       const path = (await evaluate(entry, 'location.pathname')) || '';
       const m = path.match(/\/c\/([0-9a-f-]{36})/);
       const data = await inspect(m ? m[1] : '', true);
+      if (!isActive()) return;
       if (data?.error) continue;
-      const res = await evaluate(entry, `(${pageMount.toString()})(${JSON.stringify(toView(data))})`);
-      if (res === 'superseded') {
-        process.exit(0);
-      }
-      if (res && res.startsWith('ok')) lastErr = '';
+      await render(entry, toView(data));
     } catch (e) {
       sockets.delete(t.id);
       logOnce('page ' + t.id + ': ' + e.message);
@@ -1283,14 +1349,34 @@ export { pageMount, toView, speedToView };
 
 export function startDeckInjector(inspect) {
   let busy = false;
-  setInterval(async () => {
-    if (busy) return;
+  let stopped = false;
+  const poll = async () => {
+    if (busy || stopped) return;
     busy = true;
     try {
-      await tick(inspect);
+      await tick(inspect, () => !stopped);
     } finally {
       busy = false;
     }
-  }, INTERVAL_MS);
+  };
+  // Layout changes bypass telemetry polling and any slow quota fetch. Pending
+  // updates coalesce per renderer instead of replaying obsolete destinations.
+  const unsubscribe = onSettingsChange(() => {
+    for (const [id, entry] of sockets) {
+      if (entry.view) render(entry, entry.view).catch(e => {
+        if (sockets.get(id) === entry) sockets.delete(id);
+        logOnce('settings update: ' + e.message);
+      });
+    }
+  });
+  const timer = setInterval(poll, INTERVAL_MS);
+  void poll();
   console.log('[deck] injector started, port file:', PORT_FILE);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+    unsubscribe();
+    for (const entry of sockets.values()) entry.ws.close();
+    sockets.clear();
+  };
 }

@@ -29,8 +29,13 @@ const POS_HTML = [
   ['quota', 'Quota'],
 ]
   .map(
-    ([key, label]) => `      <div class="row">
+    ([key, label]) => `      <div class="row layout-row" data-layout-key="${key}" draggable="true">
+        <span class="drag-handle" aria-hidden="true">⠿</span>
         <div class="row-main"><div class="row-label">${label}</div></div>
+        <div class="order-controls">
+          <button data-move="-1" aria-label="Move ${label} earlier" title="Move earlier"><svg viewBox="0 0 14 14"><path d="m3.5 8.5 3.5-3.5 3.5 3.5"/></svg></button>
+          <button data-move="1" aria-label="Move ${label} later" title="Move later"><svg viewBox="0 0 14 14"><path d="m3.5 5.5 3.5 3.5 3.5-3.5"/></svg></button>
+        </div>
         <div class="pos" data-key="${key}">
           <button data-v="left" aria-pressed="true" aria-label="Near the left controls" title="Near the left controls">${POS_ICON('left')}</button>
           <button data-v="right" aria-pressed="false" aria-label="Near the right controls" title="Near the right controls">${POS_ICON('right')}</button>
@@ -89,6 +94,20 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
   .row-main { min-width: 0; flex: 1 1 auto; }
   .row-label { font-size: 13px; }
   .row-hint { color: var(--muted-foreground, #87888f); font-size: 11.5px; margin-top: 1px; }
+  .section-hint { margin: -2px 0 10px; color: var(--muted-foreground, #87888f); font-size: 11.5px; }
+  .layout-label { margin: 10px 0 5px; color: var(--muted-foreground, #87888f); font-size: 11.5px; }
+  .layout-list { min-height: var(--row-h); }
+  .layout-list:empty::after { content: 'Drop a capsule here'; display: block; padding: 14px 12px; color: var(--muted-foreground, #87888f); font-size: 11.5px; }
+  .drag-handle { color: var(--muted-foreground, #87888f); cursor: grab; font-size: 18px; }
+  .layout-row.dragging { opacity: 0.45; }
+  .layout-row.drop-before { box-shadow: inset 0 2px var(--foreground, #e6e6ea); }
+  .layout-row.drop-after { box-shadow: inset 0 -2px var(--foreground, #e6e6ea); }
+  .layout-list.drag-over { outline: 1px solid var(--ring, var(--foreground, #e6e6ea)); outline-offset: -1px; }
+  .order-controls { display: inline-flex; gap: 1px; }
+  .order-controls button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground, #87888f); cursor: pointer; }
+  .order-controls button:hover:enabled { background: var(--accent, #26262b); color: var(--foreground, #e6e6ea); }
+  .order-controls button:disabled { opacity: 0.25; cursor: default; }
+  .order-controls svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .pos {
     display: inline-flex;
     gap: 2px;
@@ -146,7 +165,7 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
     transform: translateX(14px);
     background: var(--primary-foreground, var(--background, #070708));
   }
-  .switch:focus-visible, .pos button:focus-visible {
+  .switch:focus-visible, .pos button:focus-visible, .order-controls button:focus-visible {
     outline: 2px solid var(--ring, var(--border, #303034));
     outline-offset: 2px;
   }
@@ -159,7 +178,7 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="title">agy-capsule</div>
-  <div class="sub">Toggle each readout, or place it near the left or right controls.</div>
+  <div class="sub">Choose what appears in the composer and where.</div>
 
   <div class="section">
     <div class="section-label">Capsules</div>
@@ -169,10 +188,14 @@ ${SWITCH_HTML}
   </div>
 
   <div class="section">
-    <div class="section-label">Position</div>
-    <div class="card">
+    <div class="section-label">Layout</div>
+    <div class="section-hint">Drag to reorder or change sides. Arrows move earlier / later from left to right.</div>
+    <div class="layout-label">Near the left controls</div>
+    <div class="card layout-list" data-side="left">
 ${POS_HTML}
     </div>
+    <div class="layout-label">Near the right controls</div>
+    <div class="card layout-list" data-side="right"></div>
   </div>
 
   <div class="note" id="note"></div>
@@ -183,10 +206,17 @@ ${POS_HTML}
   const note = document.getElementById('note');
   let state = {};
   let saveQueue = Promise.resolve();
-  let revision = 0;
   let confirmed = {};
+  let confirmedRevision = 0;
+  let pendingPatch = {};
+  let saving = false;
+  const layoutKeys = ['context', 'speed', 'quota'];
+  function orderOf() {
+    return [...new Set([...(Array.isArray(state.order) ? state.order.filter(k => layoutKeys.includes(k)) : []), ...layoutKeys])];
+  }
 
   function paint() {
+    const focused = document.activeElement;
     for (const btn of document.querySelectorAll('.switch')) {
       btn.setAttribute('aria-checked', String(state[btn.dataset.key] !== false));
     }
@@ -196,13 +226,28 @@ ${POS_HTML}
         btn.setAttribute('aria-pressed', String(btn.dataset.v === side));
       }
     }
+    for (const list of document.querySelectorAll('.layout-list')) {
+      const keys = orderOf().filter(key => (state[key + 'Side'] === 'right' ? 'right' : 'left') === list.dataset.side);
+      keys.forEach((key, index) => {
+        const row = document.querySelector('[data-layout-key="' + key + '"]');
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+        row.querySelector('[data-move="-1"]').disabled = index === 0;
+        row.querySelector('[data-move="1"]').disabled = index === keys.length - 1;
+      });
+    }
+    if (focused?.isConnected && document.activeElement !== focused) {
+      const target = focused.disabled ? focused.closest('.layout-row')?.querySelector('.order-controls button:enabled, .pos button[aria-pressed="true"]') : focused;
+      target?.focus({ preventScroll: true });
+    }
   }
 
   async function load() {
+    const beforeLoad = confirmedRevision;
     try {
       const res = await fetch('/api/settings');
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      confirmed = await res.json();
+      const loaded = await res.json();
+      if (confirmedRevision === beforeLoad) confirmed = loaded;
       state = { ...confirmed, ...state };
       paint();
     } catch (e) {
@@ -214,9 +259,18 @@ ${POS_HTML}
   function save(patch) {
     state = { ...state, ...patch };
     paint();
-    const currentRevision = ++revision;
+    pendingPatch = { ...pendingPatch, ...patch };
     note.textContent = 'Saving…';
-    saveQueue = saveQueue.then(async () => {
+    note.classList.remove('failed');
+    if (!saving) saveQueue = flushSaves();
+    return saveQueue;
+  }
+
+  async function flushSaves() {
+    saving = true;
+    while (Object.keys(pendingPatch).length) {
+      const patch = pendingPatch;
+      pendingPatch = {};
       try {
         const res = await fetch('/api/settings/save', {
           method: 'POST',
@@ -225,20 +279,17 @@ ${POS_HTML}
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         confirmed = await res.json();
-        if (currentRevision !== revision) return;
-        state = { ...confirmed };
-        paint();
-        note.textContent = 'Saved. The composer updates within a second.';
+        confirmedRevision++;
+        note.textContent = Object.keys(pendingPatch).length ? 'Saving…' : 'Saved.';
         note.classList.remove('failed');
       } catch (e) {
-        if (currentRevision !== revision) return;
-        state = { ...confirmed };
-        paint();
         note.textContent = 'Save failed: ' + e.message;
         note.classList.add('failed');
       }
-    });
-    return saveQueue;
+      state = { ...confirmed, ...pendingPatch };
+      paint();
+    }
+    saving = false;
   }
 
   for (const btn of document.querySelectorAll('.switch')) {
@@ -250,8 +301,57 @@ ${POS_HTML}
   for (const pos of document.querySelectorAll('.pos')) {
     const key = pos.dataset.key + 'Side';
     for (const btn of pos.querySelectorAll('button')) {
-      btn.addEventListener('click', () => save({ [key]: btn.dataset.v }));
+      btn.addEventListener('click', () => { if (state[key] !== btn.dataset.v) save({ [key]: btn.dataset.v }); });
     }
+  }
+
+  function move(key, side, target, after = false) {
+    if (key === target) return;
+    const order = orderOf().filter(k => k !== key);
+    const index = order.indexOf(target);
+    order.splice(index < 0 ? order.length : index + Number(after), 0, key);
+    save({ [key + 'Side']: side, order });
+  }
+  let dragKey = '';
+  function clearDrop() {
+    for (const el of document.querySelectorAll('.drop-before, .drop-after, .drag-over')) el.classList.remove('drop-before', 'drop-after', 'drag-over');
+  }
+  for (const row of document.querySelectorAll('.layout-row')) {
+    for (const btn of row.querySelectorAll('[data-move]')) btn.addEventListener('click', () => {
+      const key = row.dataset.layoutKey;
+      const side = state[key + 'Side'] === 'right' ? 'right' : 'left';
+      const keys = orderOf().filter(k => (state[k + 'Side'] === 'right' ? 'right' : 'left') === side);
+      const direction = Number(btn.dataset.move);
+      const target = keys[keys.indexOf(key) + direction];
+      if (target) move(key, side, target, direction > 0);
+    });
+    row.addEventListener('dragstart', ev => {
+      dragKey = row.dataset.layoutKey;
+      ev.dataTransfer.setData('text/plain', dragKey);
+      ev.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => { dragKey = ''; row.classList.remove('dragging'); clearDrop(); });
+  }
+  for (const list of document.querySelectorAll('.layout-list')) {
+    list.addEventListener('dragover', ev => {
+      if (!dragKey) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      clearDrop();
+      list.classList.add('drag-over');
+      const row = ev.target.closest('.layout-row');
+      if (row && row.dataset.layoutKey !== dragKey) row.classList.add(ev.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2 ? 'drop-after' : 'drop-before');
+    });
+    list.addEventListener('dragleave', ev => { if (!list.contains(ev.relatedTarget)) clearDrop(); });
+    list.addEventListener('drop', ev => {
+      if (!dragKey) return;
+      ev.preventDefault();
+      const row = ev.target.closest('.layout-row');
+      const after = row && ev.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+      move(dragKey, list.dataset.side, row?.dataset.layoutKey, after);
+      clearDrop();
+    });
   }
 
   load();
