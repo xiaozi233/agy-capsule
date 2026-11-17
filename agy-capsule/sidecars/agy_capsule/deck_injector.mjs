@@ -99,8 +99,8 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '45') {
-    root.setAttribute('data-deck-ver', '45');
+  if (root.getAttribute('data-deck-ver') !== '46') {
+    root.setAttribute('data-deck-ver', '46');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -231,7 +231,8 @@ function pageMount(d) {
           display: none;
           position: absolute;
           bottom: calc(100% + 8px);
-          left: 0;
+          left: 50%;
+          transform: translateX(-50%);
           background: var(--card, rgba(20, 20, 22, 0.97));
           backdrop-filter: blur(22px);
           border: 1px solid var(--border, rgba(128, 128, 128, 0.18));
@@ -510,9 +511,9 @@ function pageMount(d) {
         pop.style.left = '';
         const pr = pop.getBoundingClientRect();
         if (pr.width <= 0) return;
-        const maxRight = window.innerWidth - 8;
-        if (pr.right > maxRight) {
-          pop.style.left = Math.max(-pr.left + 8, maxRight - pr.right) + 'px';
+        const shift = Math.max(8 - pr.left, Math.min(0, window.innerWidth - 8 - pr.right));
+        if (shift !== 0) {
+          pop.style.left = grp.getBoundingClientRect().width / 2 + shift + 'px';
         }
       });
       grp.addEventListener('mouseleave', () => {
