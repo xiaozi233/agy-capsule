@@ -195,15 +195,15 @@ ${SWITCH_HTML}
       <div class="row">
         <div class="row-main">
           <div class="row-label">Context style</div>
-          <div class="row-hint">Outer: context used · Inner: cached share</div>
+          <div class="row-hint">Fill: context used · Color: cache state</div>
         </div>
         <div class="style-options" role="group" aria-label="Context style">
           <button data-context-style="classic" aria-pressed="true">Value</button>
-          <button data-context-style="ring" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9.5" opacity="0.2"/><circle cx="12" cy="12" r="5.75" opacity="0.2"/><g transform="rotate(-90 12 12)" stroke-linecap="round"><circle cx="12" cy="12" r="9.5" pathLength="100" stroke-dasharray="35 100"/><circle cx="12" cy="12" r="5.75" pathLength="100" stroke-dasharray="75 100" opacity="0.65"/></g></svg>Rings</button>
+          <button data-context-style="ring" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9.5" opacity="0.2"/><g transform="rotate(-90 12 12)" stroke-linecap="round"><circle cx="12" cy="12" r="9.5" pathLength="100" stroke-dasharray="35 100"/></g></svg>Ring</button>
         </div>
       </div>
     </div>
-    <div class="section-hint" style="margin:6px 0 0">Cache ring turns amber after 3 minutes, red after 4 minutes.</div>
+    <div class="section-hint" style="margin:6px 0 0">Progress turns amber after 3 minutes, red after 4 minutes.</div>
   </div>
 
   <div class="section">

@@ -146,10 +146,10 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '57' || rootR.getAttribute('data-deck-ver') !== '57') {
+  if (root.getAttribute('data-deck-ver') !== '58' || rootR.getAttribute('data-deck-ver') !== '58') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '57');
-    rootR.setAttribute('data-deck-ver', '57');
+    root.setAttribute('data-deck-ver', '58');
+    rootR.setAttribute('data-deck-ver', '58');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -211,18 +211,17 @@ function pageMount(d) {
         }
         [id^="deck-metrics-strip"] .dk-context-ring {
           display: none;
-          width: calc(var(--dk-icon-size, 16px) + 4px);
-          height: calc(var(--dk-icon-size, 16px) + 4px);
+          width: var(--dk-icon-size, 16px);
+          height: var(--dk-icon-size, 16px);
           flex-shrink: 0;
         }
         [id^="deck-metrics-strip"] .dk-pill-context[data-context-style="ring"] .dk-ctx-pair { display: none; }
         [id^="deck-metrics-strip"] .dk-pill-context[data-context-style="ring"] .dk-context-ring { display: block; }
         [id^="deck-metrics-strip"] .dk-ring-track { stroke: currentColor; opacity: 0.18; }
-        [id^="deck-metrics-strip"] .dk-ring-usage { stroke: var(--foreground, currentColor); }
-        [id^="deck-metrics-strip"] .dk-ring-cache { stroke: var(--dk-cache-color, currentColor); opacity: 0.7; }
-        [id^="deck-metrics-strip"] .dk-ring-usage,
-        [id^="deck-metrics-strip"] .dk-ring-cache { transition: stroke-dasharray 180ms ease-out, stroke 150ms ease-out, opacity 150ms ease-out; }
-        [id^="deck-metrics-strip"] [data-cache-state="expired"] .dk-ring-cache { opacity: 0.55; }
+        [id^="deck-metrics-strip"] .dk-ring-usage {
+          stroke: var(--dk-cache-color, var(--foreground, currentColor));
+          transition: stroke-dasharray 180ms ease-out, stroke 150ms ease-out, opacity 150ms ease-out;
+        }
         [id^="deck-metrics-strip"] [data-context-known="false"] .dk-ring-track-usage { stroke-dasharray: 2 3; }
         [id^="deck-metrics-strip"].dk-hide-speed [data-el="grpSpeed"] {
           display: none;
@@ -355,8 +354,7 @@ function pageMount(d) {
           [id^="deck-metrics-strip"] .dk-svg,
           [id^="deck-metrics-strip"] .dk-val,
           [id^="deck-metrics-strip"] .dk-seg,
-          [id^="deck-metrics-strip"] .dk-ring-usage,
-          [id^="deck-metrics-strip"] .dk-ring-cache { transition: none; }
+          [id^="deck-metrics-strip"] .dk-ring-usage { transition: none; }
           [id^="deck-metrics-strip"] .dk-pop {
             transition: none;
             transform: none;
@@ -572,10 +570,8 @@ function pageMount(d) {
           </span>
           <svg class="dk-context-ring" viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true" focusable="false">
             <circle class="dk-ring-track dk-ring-track-usage" cx="12" cy="12" r="9.5"/>
-            <circle class="dk-ring-track" cx="12" cy="12" r="5.75"/>
             <g transform="rotate(-90 12 12)" stroke-linecap="round">
               <circle class="dk-ring-usage" data-el="ringUsage" cx="12" cy="12" r="9.5" pathLength="100" stroke-dasharray="0 100"/>
-              <circle class="dk-ring-cache" data-el="ringCache" cx="12" cy="12" r="5.75" pathLength="100" stroke-dasharray="0 100"/>
             </g>
           </svg>
         </button>
@@ -882,15 +878,14 @@ function pageMount(d) {
   contextPill.dataset.contextStyle = st.contextStyle === 'ring' ? 'ring' : 'classic';
   contextPill.dataset.contextKnown = String(d.contextKnown === true);
   contextPill.dataset.cacheState = d.cacheState || 'unknown';
-  contextPill.style.setProperty('--dk-cache-color', d.cacheRingColor || 'currentColor');
+  contextPill.style.setProperty('--dk-cache-color', d.cacheRingColor || 'var(--foreground, currentColor)');
   contextPill.setAttribute('aria-label', d.contextLabel || 'Context usage');
-  for (const [key, fraction] of [['ringUsage', d.contextUsedFraction], ['ringCache', d.contextCachedFraction]]) {
-    const circle = contextPill.querySelector('[data-el="' + key + '"]');
-    const value = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
-    const dash = (value * 100).toFixed(3) + ' 100';
-    if (circle.getAttribute('stroke-dasharray') !== dash) circle.setAttribute('stroke-dasharray', dash);
-    circle.style.opacity = value > 0 ? '' : '0';
-  }
+  const circle = contextPill.querySelector('[data-el="ringUsage"]');
+  const fraction = d.contextUsedFraction;
+  const value = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
+  const dash = (value * 100).toFixed(3) + ' 100';
+  if (circle.getAttribute('stroke-dasharray') !== dash) circle.setAttribute('stroke-dasharray', dash);
+  circle.style.opacity = value > 0 ? '' : '0';
 
   // Match active model to quota pills
   root._deckQuotas = d;
