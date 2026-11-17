@@ -146,10 +146,10 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '53' || rootR.getAttribute('data-deck-ver') !== '53') {
+  if (root.getAttribute('data-deck-ver') !== '54' || rootR.getAttribute('data-deck-ver') !== '54') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '53');
-    rootR.setAttribute('data-deck-ver', '53');
+    root.setAttribute('data-deck-ver', '54');
+    rootR.setAttribute('data-deck-ver', '54');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -514,9 +514,11 @@ function pageMount(d) {
         /* Quota Popover (matches plugin UI) */
         [id^="deck-metrics-strip"] .dk-quota-pop {
           width: max-content;
+          padding: 12px 16px;
+          line-height: 1.5;
         }
         [id^="deck-metrics-strip"] .dk-q-group {
-          margin-bottom: 8px;
+          margin-bottom: 12px;
         }
         [id^="deck-metrics-strip"] .dk-q-group:last-child {
           margin-bottom: 0;
@@ -524,19 +526,19 @@ function pageMount(d) {
         [id^="deck-metrics-strip"] .dk-q-title {
           font-size: inherit;
           font-weight: 500;
-          line-height: 1.25;
+          line-height: 1.4;
           color: var(--foreground, #18181b);
           color: color-mix(in srgb, var(--foreground, #18181b) 88%, transparent);
-          margin-bottom: 0px;
+          margin-bottom: 4px;
         }
         [id^="deck-metrics-strip"] .dk-q-row {
           display: grid;
-          grid-template-columns: minmax(54px, auto) 50px 48px;
+          grid-template-columns: minmax(max-content, 1fr) max-content minmax(4.5em, max-content);
           align-items: center;
-          column-gap: 8px;
+          column-gap: 14px;
           font-size: inherit;
           font-variant-numeric: tabular-nums;
-          margin-bottom: 2px;
+          margin-bottom: 4px;
         }
         [id^="deck-metrics-strip"] .dk-q-row:last-child {
           margin-bottom: 0;
@@ -554,7 +556,7 @@ function pageMount(d) {
           display: flex;
           justify-content: flex-end;
           align-items: center;
-          gap: 5px;
+          gap: 7px;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
         }
