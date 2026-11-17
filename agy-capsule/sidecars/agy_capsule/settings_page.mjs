@@ -108,7 +108,7 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
   .order-controls button:hover:enabled { background: var(--accent, #26262b); color: var(--foreground, #e6e6ea); }
   .order-controls button:disabled { opacity: 0.25; cursor: default; }
   .order-controls svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .pos {
+  .pos, .style-options {
     display: inline-flex;
     gap: 2px;
     padding: 2px;
@@ -116,7 +116,7 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
     border-radius: calc(var(--radius, 0.5rem) - 3px);
     background: color-mix(in srgb, var(--foreground, #e6e6ea) 9%, transparent);
   }
-  .pos button {
+  .pos button, .style-options button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -130,8 +130,10 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
     cursor: pointer;
     transition: background 120ms ease-out, color 120ms ease-out;
   }
-  .pos button:hover { color: var(--foreground, #e6e6ea); }
-  .pos button[aria-pressed="true"] {
+  .style-options button { width: auto; min-width: 52px; padding: 0 8px; gap: 5px; font: inherit; font-size: 12px; }
+  .style-options svg { width: 16px; height: 16px; }
+  .pos button:hover, .style-options button:hover { color: var(--foreground, #e6e6ea); }
+  .pos button[aria-pressed="true"], .style-options button[aria-pressed="true"] {
     background: var(--accent, #26262b);
     color: var(--accent-foreground, var(--foreground, #e6e6ea));
   }
@@ -165,14 +167,14 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
     transform: translateX(14px);
     background: var(--primary-foreground, var(--background, #070708));
   }
-  .switch:focus-visible, .pos button:focus-visible, .order-controls button:focus-visible {
+  .switch:focus-visible, .pos button:focus-visible, .order-controls button:focus-visible, .style-options button:focus-visible {
     outline: 2px solid var(--ring, var(--border, #303034));
     outline-offset: 2px;
   }
   .note { margin-top: 18px; color: var(--muted-foreground, #87888f); font-size: 11.5px; }
   .note.failed { color: var(--danger, #f09595); }
   @media (prefers-reduced-motion: reduce) {
-    .switch, .switch::after, .pos button { transition: none; }
+    .switch, .switch::after, .pos button, .style-options button { transition: none; }
   }
 </style>
 </head>
@@ -185,6 +187,23 @@ export const SETTINGS_HTML = `<!DOCTYPE html>
     <div class="card">
 ${SWITCH_HTML}
     </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Appearance</div>
+    <div class="card">
+      <div class="row">
+        <div class="row-main">
+          <div class="row-label">Context style</div>
+          <div class="row-hint">Outer: context used · Inner: cached share</div>
+        </div>
+        <div class="style-options" role="group" aria-label="Context style">
+          <button data-context-style="classic" aria-pressed="true">Value</button>
+          <button data-context-style="ring" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9.5" opacity="0.2"/><circle cx="12" cy="12" r="5.75" opacity="0.2"/><g transform="rotate(-90 12 12)" stroke-linecap="round"><circle cx="12" cy="12" r="9.5" pathLength="100" stroke-dasharray="35 100"/><circle cx="12" cy="12" r="5.75" pathLength="100" stroke-dasharray="75 100" opacity="0.65"/></g></svg>Rings</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-hint" style="margin:6px 0 0">Cache ring turns amber after 3 minutes, red after 4 minutes.</div>
   </div>
 
   <div class="section">
@@ -219,6 +238,9 @@ ${POS_HTML}
     const focused = document.activeElement;
     for (const btn of document.querySelectorAll('.switch')) {
       btn.setAttribute('aria-checked', String(state[btn.dataset.key] !== false));
+    }
+    for (const btn of document.querySelectorAll('[data-context-style]')) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.contextStyle === (state.contextStyle === 'ring' ? 'ring' : 'classic')));
     }
     for (const pos of document.querySelectorAll('.pos')) {
       const side = state[pos.dataset.key + 'Side'] === 'right' ? 'right' : 'left';
@@ -303,6 +325,10 @@ ${POS_HTML}
     for (const btn of pos.querySelectorAll('button')) {
       btn.addEventListener('click', () => { if (state[key] !== btn.dataset.v) save({ [key]: btn.dataset.v }); });
     }
+  }
+
+  for (const btn of document.querySelectorAll('[data-context-style]')) {
+    btn.addEventListener('click', () => { if (state.contextStyle !== btn.dataset.contextStyle) save({ contextStyle: btn.dataset.contextStyle }); });
   }
 
   function move(key, side, target, after = false) {

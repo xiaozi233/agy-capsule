@@ -131,11 +131,11 @@ function pageMount(d) {
       for (const grp of strip.querySelectorAll('.dk-grp')) {
         const pill = grp.querySelector('.dk-pill');
         const rect = pill.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) previousCapsules.set(grp.dataset.el, { rect, opacity: getComputedStyle(pill).opacity, pill: snapshotPill(pill) });
+        if (rect.width > 0 && rect.height > 0) previousCapsules.set(grp.dataset.el, { rect, opacity: getComputedStyle(pill).opacity, contextStyle: pill.dataset.contextStyle, pill: snapshotPill(pill) });
       }
     }
     for (const ghost of root._animationLayer?.children || []) {
-      if (!previousCapsules.has(ghost.dataset.dkKey)) previousCapsules.set(ghost.dataset.dkKey, { rect: ghost.getBoundingClientRect(), opacity: getComputedStyle(ghost).opacity, pill: ghost.cloneNode(true) });
+      if (!previousCapsules.has(ghost.dataset.dkKey)) previousCapsules.set(ghost.dataset.dkKey, { rect: ghost.getBoundingClientRect(), opacity: getComputedStyle(ghost).opacity, contextStyle: ghost.dataset.contextStyle, pill: ghost.cloneNode(true) });
     }
     for (const pill of [...root.querySelectorAll('.dk-pill'), ...rootR.querySelectorAll('.dk-pill')]) {
       pill._deckMotion?.cancel();
@@ -146,10 +146,10 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '56' || rootR.getAttribute('data-deck-ver') !== '56') {
+  if (root.getAttribute('data-deck-ver') !== '57' || rootR.getAttribute('data-deck-ver') !== '57') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '56');
-    rootR.setAttribute('data-deck-ver', '56');
+    root.setAttribute('data-deck-ver', '57');
+    rootR.setAttribute('data-deck-ver', '57');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -209,6 +209,21 @@ function pageMount(d) {
         [id^="deck-metrics-strip"] .dk-pill-quota {
           gap: 10px;
         }
+        [id^="deck-metrics-strip"] .dk-context-ring {
+          display: none;
+          width: calc(var(--dk-icon-size, 16px) + 4px);
+          height: calc(var(--dk-icon-size, 16px) + 4px);
+          flex-shrink: 0;
+        }
+        [id^="deck-metrics-strip"] .dk-pill-context[data-context-style="ring"] .dk-ctx-pair { display: none; }
+        [id^="deck-metrics-strip"] .dk-pill-context[data-context-style="ring"] .dk-context-ring { display: block; }
+        [id^="deck-metrics-strip"] .dk-ring-track { stroke: currentColor; opacity: 0.18; }
+        [id^="deck-metrics-strip"] .dk-ring-usage { stroke: var(--foreground, currentColor); }
+        [id^="deck-metrics-strip"] .dk-ring-cache { stroke: var(--dk-cache-color, currentColor); opacity: 0.7; }
+        [id^="deck-metrics-strip"] .dk-ring-usage,
+        [id^="deck-metrics-strip"] .dk-ring-cache { transition: stroke-dasharray 180ms ease-out, stroke 150ms ease-out, opacity 150ms ease-out; }
+        [id^="deck-metrics-strip"] [data-cache-state="expired"] .dk-ring-cache { opacity: 0.55; }
+        [id^="deck-metrics-strip"] [data-context-known="false"] .dk-ring-track-usage { stroke-dasharray: 2 3; }
         [id^="deck-metrics-strip"].dk-hide-speed [data-el="grpSpeed"] {
           display: none;
         }
@@ -339,7 +354,9 @@ function pageMount(d) {
           [id^="deck-metrics-strip"] .dk-pill,
           [id^="deck-metrics-strip"] .dk-svg,
           [id^="deck-metrics-strip"] .dk-val,
-          [id^="deck-metrics-strip"] .dk-seg { transition: none; }
+          [id^="deck-metrics-strip"] .dk-seg,
+          [id^="deck-metrics-strip"] .dk-ring-usage,
+          [id^="deck-metrics-strip"] .dk-ring-cache { transition: none; }
           [id^="deck-metrics-strip"] .dk-pop {
             transition: none;
             transform: none;
@@ -548,11 +565,19 @@ function pageMount(d) {
 
       <!-- Context Capsule + Popover -->
       <div class="dk-grp" data-el="grpCtx">
-        <button type="button" class="dk-pill dk-pill-context">
+        <button type="button" class="dk-pill dk-pill-context" data-context-style="classic">
           <span class="dk-ctx-pair">
             <svg class="dk-svg" data-el="ctxIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
             <span class="dk-val" data-k="pillCtx">--%</span>
           </span>
+          <svg class="dk-context-ring" viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true" focusable="false">
+            <circle class="dk-ring-track dk-ring-track-usage" cx="12" cy="12" r="9.5"/>
+            <circle class="dk-ring-track" cx="12" cy="12" r="5.75"/>
+            <g transform="rotate(-90 12 12)" stroke-linecap="round">
+              <circle class="dk-ring-usage" data-el="ringUsage" cx="12" cy="12" r="9.5" pathLength="100" stroke-dasharray="0 100"/>
+              <circle class="dk-ring-cache" data-el="ringCache" cx="12" cy="12" r="5.75" pathLength="100" stroke-dasharray="0 100"/>
+            </g>
+          </svg>
         </button>
         <div class="dk-pop dk-ctx-pop">
           <div class="dk-cache-bar" data-el="rowCacheHit">
@@ -853,6 +878,20 @@ function pageMount(d) {
   setK('valOutPct', d.valOutPct);
   setK('valOutK', d.valOutK);
 
+  const contextPill = root._capsules.get('context').querySelector('.dk-pill');
+  contextPill.dataset.contextStyle = st.contextStyle === 'ring' ? 'ring' : 'classic';
+  contextPill.dataset.contextKnown = String(d.contextKnown === true);
+  contextPill.dataset.cacheState = d.cacheState || 'unknown';
+  contextPill.style.setProperty('--dk-cache-color', d.cacheRingColor || 'currentColor');
+  contextPill.setAttribute('aria-label', d.contextLabel || 'Context usage');
+  for (const [key, fraction] of [['ringUsage', d.contextUsedFraction], ['ringCache', d.contextCachedFraction]]) {
+    const circle = contextPill.querySelector('[data-el="' + key + '"]');
+    const value = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
+    const dash = (value * 100).toFixed(3) + ' 100';
+    if (circle.getAttribute('stroke-dasharray') !== dash) circle.setAttribute('stroke-dasharray', dash);
+    circle.style.opacity = value > 0 ? '' : '0';
+  }
+
   // Match active model to quota pills
   root._deckQuotas = d;
   const applyModelQuota = () => {
@@ -1029,10 +1068,12 @@ function pageMount(d) {
         const previous = previousCapsules.get(grp.dataset.el);
         const dx = previous ? previous.rect.left - rect.left : 0;
         const dy = previous ? previous.rect.top - rect.top : 3;
-        if (!previous || Number(previous.opacity) < 1 || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        const styleChanged = previous && grp.dataset.el === 'grpCtx' && previous.contextStyle !== pill.dataset.contextStyle;
+        if (styleChanged) previous.exit = true;
+        if (!previous || styleChanged || Number(previous.opacity) < 1 || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
           pill.style.willChange = 'transform, opacity';
           const motion = pill.animate([
-            { opacity: previous ? previous.opacity : 0, transform: `translate3d(${dx}px, ${dy}px, 0)` },
+            { opacity: previous && !styleChanged ? previous.opacity : 0, transform: `translate3d(${dx}px, ${dy}px, 0)` },
             { opacity: 1, transform: 'none' },
           ], { duration: 160, easing: 'cubic-bezier(0.2, 0.65, 0.3, 1)' });
           pill._deckMotion = motion;
@@ -1042,7 +1083,7 @@ function pageMount(d) {
       }
     }
     for (const [key, previous] of previousCapsules) {
-      if (visible.has(key)) continue;
+      if (visible.has(key) && !previous.exit) continue;
       const ghost = previous.pill;
       ghost.dataset.dkGhost = '';
       ghost.dataset.dkKey = key;
@@ -1167,6 +1208,10 @@ function toView(d) {
   const thinkPct = pctStr(think);
   const turn0Pct = pctStr(turn0);
   const cacheHitPct = ctx > 0 ? Math.round((cached / ctx) * 100) : 0;
+  const clampFraction = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  const contextKnown = hasMax && Number.isFinite(maxCtx) && Number.isFinite(ctx);
+  const contextUsedFraction = contextKnown ? clampFraction(ctx / maxCtx) : 0;
+  const contextCachedFraction = ctx > 0 ? clampFraction(cached / ctx) : 0;
 
   const idleSec = ctx > 0 && d.lastStepEpochMs ? Math.max(0, Math.floor((Date.now() - d.lastStepEpochMs) / 1000)) : 0;
   let cacheIconSvg =
@@ -1177,14 +1222,20 @@ function toView(d) {
   let valCacheHit = cacheHitPct + '%';
   let valCacheHitK = '';
   let ctxIconColor = '';
+  let cacheState = ctx <= 0 ? 'empty' : d.lastStepEpochMs ? 'active' : 'unknown';
+  let cacheRingColor = '';
 
   if (idleSec >= 240) {
+    cacheState = 'expired';
+    cacheRingColor = '#e06c75';
     cacheIconSvg =
       '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#e06c75" stroke-width="2" stroke-linecap="round"><line x1="2.2" y1="2.2" x2="9.8" y2="9.8"/><line x1="9.8" y1="2.2" x2="2.2" y2="9.8"/></svg>';
     cacheValDeco = 'line-through';
     cacheValOp = '0.5';
     ctxIconColor = 'rgba(208, 122, 128, 0.88)';
   } else if (idleSec >= 180) {
+    cacheState = 'expiring';
+    cacheRingColor = '#d4940a';
     const remMin = Math.max(1, Math.ceil((240 - idleSec) / 60));
     cacheIconSvg =
       '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#d4940a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="4.8"/><polyline points="6 3.5 6 6 7.8 7.2"/></svg>';
@@ -1238,6 +1289,12 @@ function toView(d) {
 
   return {
     pillCtx: hasMax ? usedPctRound + '%' : (ctx === 0 ? '0%' : '--%'),
+    contextKnown,
+    contextUsedFraction,
+    contextCachedFraction,
+    cacheState,
+    cacheRingColor,
+    contextLabel: 'Context ' + (contextKnown ? usedPctRound + '% used' : ctx === 0 ? 'empty' : 'limit unknown') + '; cache ' + Math.round(contextCachedFraction * 100) + '% of context; ' + cacheState,
     ...speedToView(d),
     ctxIconColor,
     usedPctText: hasMax ? usedPctRound + '% used' : (ctx === 0 ? '0% used' : '--% used'),
