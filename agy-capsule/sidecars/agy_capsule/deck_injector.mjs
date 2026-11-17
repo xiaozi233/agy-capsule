@@ -99,8 +99,8 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '43') {
-    root.setAttribute('data-deck-ver', '43');
+  if (root.getAttribute('data-deck-ver') !== '44') {
+    root.setAttribute('data-deck-ver', '44');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -438,7 +438,7 @@ function pageMount(d) {
             <span class="dk-val" data-k="pillCtx">--%</span>
           </span>
           <span class="dk-ctx-pair" data-el="speedPill">
-            <svg class="dk-svg" data-el="speedIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <svg class="dk-svg" data-el="speedIconSvg" style="color: #d4940a" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
           </span>
         </div>
