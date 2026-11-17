@@ -146,10 +146,10 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '55' || rootR.getAttribute('data-deck-ver') !== '55') {
+  if (root.getAttribute('data-deck-ver') !== '56' || rootR.getAttribute('data-deck-ver') !== '56') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '55');
-    rootR.setAttribute('data-deck-ver', '55');
+    root.setAttribute('data-deck-ver', '56');
+    rootR.setAttribute('data-deck-ver', '56');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -499,7 +499,6 @@ function pageMount(d) {
         /* Quota Popover (matches plugin UI) */
         [id^="deck-metrics-strip"] .dk-quota-pop {
           width: max-content;
-          padding: 12px 16px;
           line-height: 1.5;
         }
         [id^="deck-metrics-strip"] .dk-q-group {
@@ -533,7 +532,7 @@ function pageMount(d) {
           white-space: nowrap;
         }
         [id^="deck-metrics-strip"] .dk-q-mid {
-          text-align: left;
+          text-align: right;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
         }
