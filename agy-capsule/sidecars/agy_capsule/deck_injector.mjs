@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { getSettings } from './settings.mjs';
 
 const INTERVAL_MS = 1000;
 const INSTANCE_TS = Date.now();
@@ -89,7 +90,8 @@ function pageMount(d) {
   if (d.instanceTs) {
     window.__deckOwnerTs = d.instanceTs;
   }
-  const footerLeft = document.querySelector('.agy-composer-footer > div:first-child');
+  const footer = Array.from(document.querySelectorAll('.agy-composer-footer')).find((el) => el.getClientRects().length > 0);
+  const footerLeft = footer?.firstElementChild;
   if (!footerLeft) return 'no-footer';
 
   let root = document.getElementById('deck-metrics-strip');
@@ -97,21 +99,41 @@ function pageMount(d) {
     root = document.createElement('div');
     root.id = 'deck-metrics-strip';
   }
+  if (window.__deckMetricsRoot && window.__deckMetricsRoot !== root) window.__deckMetricsRoot._dispose?.();
+  window.__deckMetricsRoot = root;
+  // Second strip: capsules whose position setting is "right".
+  let rootR = document.getElementById('deck-metrics-strip-r');
+  if (!rootR) {
+    rootR = document.createElement('div');
+    rootR.id = 'deck-metrics-strip-r';
+  }
+
+  const settingsKey = JSON.stringify(d.settings || {});
+  const settingsChanged = root._settingsKey !== settingsKey;
+  const previousCapsules = new Map();
+  if (settingsChanged) {
+    for (const strip of [root, rootR]) {
+      for (const grp of strip.querySelectorAll('.dk-grp')) {
+        const pill = grp.querySelector('.dk-pill');
+        const rect = pill.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) previousCapsules.set(grp.dataset.el, { rect, pill: pill.cloneNode(true) });
+        for (const animation of pill.getAnimations()) animation.cancel();
+      }
+    }
+    root._animationLayer?.replaceChildren();
+  }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '46') {
-    root.setAttribute('data-deck-ver', '46');
+  if (root.getAttribute('data-deck-ver') !== '52' || rootR.getAttribute('data-deck-ver') !== '52') {
+    root._dispose?.();
+    root.setAttribute('data-deck-ver', '52');
+    rootR.setAttribute('data-deck-ver', '52');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
       'flex-shrink: 0',
-      'gap: 0px',
-      'margin-left: 6px',
-      'margin-right: 6px',
-      'font-size: 12.5px',
-      // Match the promo's Source Han faces, with local-only cross-platform fallbacks.
-      'font-family: "Source Han Sans CN", "思源黑体 CN", "Source Han Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif',
-      'font-weight: 400',
+      'gap: 2px',
+      'font: inherit',
       'font-variation-settings: normal',
       'font-variant-ligatures: normal',
       'line-height: normal',
@@ -123,18 +145,28 @@ function pageMount(d) {
 
     root.innerHTML = `
       <style>
-        #deck-metrics-strip .dk-grp {
+        .agy-composer-footer.dk-composer-footer > .dk-native-left { flex: 0 1 auto; min-width: 0; }
+        .agy-composer-footer.dk-composer-footer > .dk-native-right { flex-shrink: 0; margin-left: auto; }
+        #deck-metrics-dock { display: flex; align-items: center; flex: 1 1 0%; min-width: 0; gap: 0; }
+        #deck-metrics-spacer { flex: 1 1 8px; min-width: 8px; }
+        #deck-metrics-dock.dk-dock-empty { display: none; }
+        [id^="deck-metrics-strip"], [id^="deck-metrics-strip"] * { box-sizing: border-box; }
+        [id^="deck-metrics-strip"] .dk-grp {
           display: inline-flex;
           align-items: center;
           /* Anchor each popover to its own capsule. */
           position: relative;
         }
-        #deck-metrics-strip .dk-pill {
+        [id^="deck-metrics-strip"] .dk-pill {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
-          padding: 3px 5px;
-          border-radius: 6px;
+          gap: 6px;
+          min-height: var(--dk-control-height, 28px);
+          padding: 0 var(--dk-control-padding, 6px);
+          border-radius: var(--dk-control-radius, 6px);
+          font: inherit;
+          color: inherit;
+          line-height: inherit;
           cursor: default;
           position: relative;
           background: transparent;
@@ -142,46 +174,79 @@ function pageMount(d) {
           white-space: nowrap;
           transition: background 0.12s ease, color 0.12s ease;
         }
-        #deck-metrics-strip .dk-grp:hover .dk-pill {
-          background: var(--secondary, rgba(128, 128, 128, 0.12));
-          color: var(--foreground, #0a0a0c);
+        [id^="deck-metrics-strip"] .dk-grp:hover .dk-pill,
+        [id^="deck-metrics-strip"] .dk-grp:focus-within .dk-pill {
+          background: var(--accent, var(--secondary, rgba(128, 128, 128, 0.12)));
+          color: var(--accent-foreground, var(--foreground, inherit));
         }
-        #deck-metrics-strip .dk-grp:hover .dk-val,
-        #deck-metrics-strip .dk-grp:hover .dk-svg {
-          color: var(--foreground, #0a0a0c);
+        [id^="deck-metrics-strip"] .dk-pill:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: 2px; }
+        [id^="deck-metrics-strip"] .dk-grp:hover .dk-val,
+        [id^="deck-metrics-strip"] .dk-grp:hover .dk-svg {
+          color: var(--accent-foreground, var(--foreground, inherit));
         }
-        #deck-metrics-strip .dk-pill-context,
-        #deck-metrics-strip .dk-pill-quota {
+        [id^="deck-metrics-strip"] .dk-pill-quota {
           gap: 10px;
         }
-        #deck-metrics-strip.dk-hide-speed [data-el="speedPill"] {
+        [id^="deck-metrics-strip"].dk-hide-speed [data-el="grpSpeed"],
+        [id^="deck-metrics-strip"].dk-hide-speed .dk-sep {
           display: none;
         }
-        #deck-metrics-strip.dk-hide-wk [data-el="pairWk"],
-        #deck-metrics-strip.dk-hide-5h [data-el="pair5h"] {
+        [id^="deck-metrics-strip"].dk-hide-wk [data-el="pairWk"],
+        [id^="deck-metrics-strip"].dk-hide-5h [data-el="pair5h"],
+        [id^="deck-metrics-strip"].dk-off-wk [data-el="pairWk"],
+        [id^="deck-metrics-strip"].dk-off-5h [data-el="pair5h"] {
           display: none;
         }
-        #deck-metrics-strip.dk-hide-wk .dk-pill-quota,
-        #deck-metrics-strip.dk-hide-5h .dk-pill-quota {
+        [id^="deck-metrics-strip"].dk-hide-wk .dk-pill-quota,
+        [id^="deck-metrics-strip"].dk-hide-5h .dk-pill-quota,
+        [id^="deck-metrics-strip"].dk-off-wk .dk-pill-quota,
+        [id^="deck-metrics-strip"].dk-off-5h .dk-pill-quota {
           gap: 0;
         }
-        #deck-metrics-strip.dk-hide-qval [data-el="grpQuota"] .dk-val {
+        [id^="deck-metrics-strip"].dk-hide-qval [data-el="grpQuota"] .dk-val {
           display: none;
         }
-        #deck-metrics-strip.dk-hide-qval [data-el="grpQuota"] .dk-q-pair {
+        [id^="deck-metrics-strip"].dk-hide-qval [data-el="grpQuota"] .dk-q-pair {
           gap: 0;
         }
-        #deck-metrics-strip.dk-hide-cval [data-el="grpCtx"] .dk-val {
+        [id^="deck-metrics-strip"].dk-hide-cval [data-el="grpCtx"] .dk-val {
           display: none;
         }
-        #deck-metrics-strip.dk-hide-cval [data-el="grpCtx"] .dk-pill {
+        [id^="deck-metrics-strip"].dk-hide-cval [data-el="grpCtx"] .dk-pill {
           gap: 0;
         }
-        #deck-metrics-strip.dk-hide-quota [data-el="grpQuota"] {
+        [id^="deck-metrics-strip"].dk-hide-quota [data-el="grpQuota"] {
           display: none;
         }
-        #deck-metrics-strip.dk-hide-all {
+        /* Per-capsule switches come from the plugin settings page. */
+        [id^="deck-metrics-strip"].dk-off-ctx [data-el="grpCtx"],
+        [id^="deck-metrics-strip"].dk-off-speed [data-el="grpSpeed"],
+        [id^="deck-metrics-strip"].dk-off-quota [data-el="grpQuota"],
+        [id^="deck-metrics-strip"].dk-off-all,
+        [id^="deck-metrics-strip"].dk-hide-all {
           display: none !important;
+        }
+        /* A capsule assigned to the other side is hidden in this strip, and a
+           strip left with nothing to show keeps out of the layout entirely. */
+        [id^="deck-metrics-strip"].dk-away-ctx [data-el="grpCtx"],
+        [id^="deck-metrics-strip"].dk-away-speed [data-el="grpSpeed"],
+        [id^="deck-metrics-strip"].dk-away-quota [data-el="grpQuota"],
+        [id^="deck-metrics-strip"].dk-away-quota .dk-sep,
+        [id^="deck-metrics-strip"].dk-nosep .dk-sep,
+        [id^="deck-metrics-strip"].dk-empty {
+          display: none !important;
+        }
+        /* The separator only earns its place when the quota group is there. */
+        [id^="deck-metrics-strip"].dk-off-quota .dk-sep {
+          display: none;
+        }
+        /* Hairline between the session readouts and the account quota. */
+        [id^="deck-metrics-strip"] .dk-sep {
+          width: 1px;
+          height: 12px;
+          margin: 0 6px;
+          flex-shrink: 0;
+          background: var(--border, rgba(128, 128, 128, 0.28));
         }
         .dk-fl-squeezed {
           min-width: 0 !important;
@@ -208,65 +273,89 @@ function pageMount(d) {
         .dk-model-squeezed svg {
           flex-shrink: 0 !important;
         }
-        #deck-metrics-strip .dk-ctx-pair,
-        #deck-metrics-strip .dk-q-pair {
+        [id^="deck-metrics-strip"] .dk-ctx-pair,
+        [id^="deck-metrics-strip"] .dk-q-pair {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
+          gap: 6px;
         }
-        #deck-metrics-strip .dk-svg {
-          width: 13px;
-          height: 13px;
-          color: var(--muted-foreground, rgba(142, 142, 147, 0.85));
+        [id^="deck-metrics-strip"] .dk-svg {
+          width: var(--dk-icon-size, 16px);
+          height: var(--dk-icon-size, 16px);
+          color: inherit;
           flex-shrink: 0;
           transition: color 0.12s ease;
         }
-        #deck-metrics-strip .dk-val {
-          font-weight: 500;
-          color: var(--muted-foreground, #71717a);
+        [id^="deck-metrics-strip"] .dk-val {
+          font-weight: inherit;
+          color: inherit;
           font-variant-numeric: tabular-nums;
           transition: color 0.12s ease;
         }
-        #deck-metrics-strip .dk-pop {
-          display: none;
+        /* Animate only vertically: measuring an animated scale shifts the anchor. */
+        [id^="deck-metrics-strip"] .dk-pop {
           position: absolute;
           bottom: calc(100% + 8px);
-          left: 50%;
-          transform: translateX(-50%);
-          background: var(--card, rgba(20, 20, 22, 0.97));
-          backdrop-filter: blur(22px);
-          border: 1px solid var(--border, rgba(128, 128, 128, 0.18));
-          border-radius: 10px;
+          left: 0;
+          width: max-content;
+          max-width: calc(100vw - 16px);
+          overflow: auto;
+          scrollbar-width: thin;
+          scrollbar-color: var(--muted-foreground, #8e8e93) transparent;
+          background: var(--popover, var(--card, #131317));
+          border: 1px solid var(--border, rgba(128, 128, 128, 0.28));
+          border-radius: var(--radius, 0.5rem);
           padding: 10px 12px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.12), 0 2px 4px -2px rgba(0, 0, 0, 0.12);
           z-index: 999999;
-          color: var(--muted-foreground, #8e8e93);
-          font-size: 13.5px;
+          color: var(--popover-foreground, var(--muted-foreground, #9a9aa3));
+          font-family: inherit;
+          font-size: var(--dk-pop-font-size, 13px);
           line-height: 1.35;
           pointer-events: none;
+          opacity: 0;
+          visibility: hidden;
+          transform: translateY(var(--dk-enter-y, 4px));
+          transition:
+            opacity 150ms ease-out,
+            transform 150ms ease-out,
+            visibility 0s linear 150ms;
         }
-        #deck-metrics-strip .dk-grp:hover .dk-pop {
-          display: block;
+        [id^="deck-metrics-strip"] .dk-grp[data-open="true"] .dk-pop {
+          opacity: 1;
+          visibility: visible;
+          transform: none;
+          transition-delay: 0s;
+          pointer-events: auto;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [id^="deck-metrics-strip"] .dk-pill,
+          [id^="deck-metrics-strip"] .dk-svg,
+          [id^="deck-metrics-strip"] .dk-val,
+          [id^="deck-metrics-strip"] .dk-seg { transition: none; }
+          [id^="deck-metrics-strip"] .dk-pop {
+            transition: none;
+            transform: none;
+          }
         }
         /* Context Popover (matches plugin UI) */
-        #deck-metrics-strip .dk-ctx-pop {
+        [id^="deck-metrics-strip"] .dk-ctx-pop {
           width: max-content;
           min-width: 176px;
         }
-        #deck-metrics-strip .dk-cache-bar {
+        [id^="deck-metrics-strip"] .dk-cache-bar {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 12px;
-          font-size: 13.5px;
+          font-size: inherit;
           line-height: 1.35;
           margin-top: 2px;
           padding-bottom: 5px;
           margin-bottom: 7.5px;
-          border-bottom: 1px solid rgba(142, 142, 147, 0.24);
-          border-bottom: 1px solid color-mix(in srgb, var(--foreground, #18181b) 17%, transparent);
+          border-bottom: 1px solid var(--border, rgba(128, 128, 128, 0.22));
         }
-        #deck-metrics-strip .dk-cache-left {
+        [id^="deck-metrics-strip"] .dk-cache-left {
           display: inline-flex;
           align-items: center;
           gap: 7px;
@@ -275,44 +364,44 @@ function pageMount(d) {
           color: color-mix(in srgb, var(--foreground, #18181b) 88%, transparent);
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-cache-pct {
+        [id^="deck-metrics-strip"] .dk-cache-pct {
           margin-left: -2px;
           font-variant-numeric: tabular-nums;
-          font-size: 13.5px;
+          font-size: inherit;
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-cache-k {
+        [id^="deck-metrics-strip"] .dk-cache-k {
           text-align: right;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
           font-variant-numeric: tabular-nums;
-          font-size: 13.5px;
+          font-size: inherit;
           font-weight: 400;
         }
-        #deck-metrics-strip .dk-cache-k:empty {
+        [id^="deck-metrics-strip"] .dk-cache-k:empty {
           display: none;
         }
-        #deck-metrics-strip .dk-summary-row {
+        [id^="deck-metrics-strip"] .dk-summary-row {
           display: flex;
           justify-content: space-between;
           align-items: baseline;
           gap: 12px;
           margin-bottom: 6.5px;
         }
-        #deck-metrics-strip .dk-used-pct {
-          font-size: 13.5px;
+        [id^="deck-metrics-strip"] .dk-used-pct {
+          font-size: inherit;
           font-weight: 500;
           color: var(--foreground, #18181b);
           color: color-mix(in srgb, var(--foreground, #18181b) 88%, transparent);
         }
-        #deck-metrics-strip .dk-used-frac {
-          font-size: 13.5px;
+        [id^="deck-metrics-strip"] .dk-used-frac {
+          font-size: inherit;
           font-weight: 500;
           color: var(--foreground, #18181b);
           color: color-mix(in srgb, var(--foreground, #18181b) 88%, transparent);
           font-variant-numeric: tabular-nums;
         }
-        #deck-metrics-strip .dk-track {
+        [id^="deck-metrics-strip"] .dk-track {
           position: relative;
           width: 100%;
           height: 4px;
@@ -323,105 +412,123 @@ function pageMount(d) {
           overflow: hidden;
           margin-bottom: 8.5px;
         }
-        #deck-metrics-strip .dk-seg {
+        [id^="deck-metrics-strip"] .dk-seg {
           height: 100%;
           border-radius: 999px;
           transition: width 0.25s ease;
         }
-        #deck-metrics-strip .dk-list {
+        [id^="deck-metrics-strip"] .dk-list {
           display: grid;
           grid-template-columns: 1fr auto minmax(44px, auto);
           row-gap: 6px;
           column-gap: 8px;
           align-items: center;
         }
-        #deck-metrics-strip .dk-item-row {
+        [id^="deck-metrics-strip"] .dk-item-row {
           display: contents;
         }
-        #deck-metrics-strip .dk-item-left {
+        [id^="deck-metrics-strip"] .dk-item-left {
           display: flex;
           align-items: center;
           gap: 7px;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-dot {
+        [id^="deck-metrics-strip"] .dk-dot {
           width: 10px;
           height: 10px;
           border-radius: 3px;
           flex-shrink: 0;
         }
-        #deck-metrics-strip .dk-item-pct {
+        [id^="deck-metrics-strip"] .dk-item-pct {
           text-align: right;
           justify-self: end;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
           font-variant-numeric: tabular-nums;
-          font-size: 13.5px;
+          font-size: inherit;
           margin-right: 6px;
         }
-        #deck-metrics-strip .dk-item-k {
+        [id^="deck-metrics-strip"] .dk-item-k {
           text-align: right;
           justify-self: end;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
           font-variant-numeric: tabular-nums;
-          font-size: 13.5px;
+          font-size: inherit;
         }
-        #deck-metrics-strip .dk-speed-section {
+        [id^="deck-metrics-strip"] .dk-speed-section {
           margin-top: 8px;
           padding-top: 7px;
-          border-top: 1px solid rgba(142, 142, 147, 0.18);
+          border-top: 1px solid var(--border, rgba(128, 128, 128, 0.22));
           font-variant-numeric: tabular-nums;
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-speed-row {
+        [id^="deck-metrics-strip"] .dk-speed-row {
           display: flex;
           justify-content: space-between;
           gap: 12px;
           margin-top: 4px;
         }
-        #deck-metrics-strip .dk-speed-row:first-child { margin-top: 0; }
+        [id^="deck-metrics-strip"] .dk-speed-row:first-child { margin-top: 0; }
+        /* Compact speed popover has no section divider of its own. */
+        [id^="deck-metrics-strip"] .dk-speed-pop {
+          min-width: 138px;
+        }
+        [id^="deck-metrics-strip"] .dk-speed-pop .dk-speed-section {
+          margin-top: 0;
+          padding-top: 0;
+          border-top: none;
+        }
+        /* Speed has its own capsule now; the full popover keeps those rows only
+           when the speed capsule is folded away on a narrow composer. */
+        [id^="deck-metrics-strip"] .dk-ctx-pop .dk-speed-section {
+          display: none;
+        }
+        [id^="deck-metrics-strip"].dk-hide-speed .dk-ctx-pop .dk-speed-section {
+          display: block;
+        }
+        [id^="deck-metrics-strip"].dk-off-speed .dk-ctx-pop .dk-speed-section { display: none; }
         /* Quota Popover (matches plugin UI) */
-        #deck-metrics-strip .dk-quota-pop {
+        [id^="deck-metrics-strip"] .dk-quota-pop {
           width: max-content;
         }
-        #deck-metrics-strip .dk-q-group {
+        [id^="deck-metrics-strip"] .dk-q-group {
           margin-bottom: 8px;
         }
-        #deck-metrics-strip .dk-q-group:last-child {
+        [id^="deck-metrics-strip"] .dk-q-group:last-child {
           margin-bottom: 0;
         }
-        #deck-metrics-strip .dk-q-title {
-          font-size: 13.5px;
+        [id^="deck-metrics-strip"] .dk-q-title {
+          font-size: inherit;
           font-weight: 500;
           line-height: 1.25;
           color: var(--foreground, #18181b);
           color: color-mix(in srgb, var(--foreground, #18181b) 88%, transparent);
           margin-bottom: 0px;
         }
-        #deck-metrics-strip .dk-q-row {
+        [id^="deck-metrics-strip"] .dk-q-row {
           display: grid;
           grid-template-columns: minmax(54px, auto) 50px 48px;
           align-items: center;
           column-gap: 8px;
-          font-size: 13.5px;
+          font-size: inherit;
           font-variant-numeric: tabular-nums;
           margin-bottom: 2px;
         }
-        #deck-metrics-strip .dk-q-row:last-child {
+        [id^="deck-metrics-strip"] .dk-q-row:last-child {
           margin-bottom: 0;
         }
-        #deck-metrics-strip .dk-q-label {
+        [id^="deck-metrics-strip"] .dk-q-label {
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-q-mid {
+        [id^="deck-metrics-strip"] .dk-q-mid {
           text-align: left;
           color: var(--muted-foreground, #8e8e93);
           white-space: nowrap;
         }
-        #deck-metrics-strip .dk-q-right {
+        [id^="deck-metrics-strip"] .dk-q-right {
           display: flex;
           justify-content: flex-end;
           align-items: center;
@@ -433,16 +540,12 @@ function pageMount(d) {
 
       <!-- Context Capsule + Popover -->
       <div class="dk-grp" data-el="grpCtx">
-        <div class="dk-pill dk-pill-context">
+        <button type="button" class="dk-pill dk-pill-context">
           <span class="dk-ctx-pair">
             <svg class="dk-svg" data-el="ctxIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
             <span class="dk-val" data-k="pillCtx">--%</span>
           </span>
-          <span class="dk-ctx-pair" data-el="speedPill">
-            <svg class="dk-svg" data-el="speedIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
-          </span>
-        </div>
+        </button>
         <div class="dk-pop dk-ctx-pop">
           <div class="dk-cache-bar" data-el="rowCacheHit">
             <div class="dk-cache-left"><span class="dk-dot" data-el="dotCached" style="display:inline-flex;align-items:center;justify-content:center;background:transparent"></span><span>Cache</span><span class="dk-cache-pct" data-k="valCacheHit" data-el="valCacheHitEl">0%</span></div>
@@ -488,9 +591,28 @@ function pageMount(d) {
         </div>
       </div>
 
+      <!-- Speed Capsule + Popover -->
+      <div class="dk-grp" data-el="grpSpeed">
+        <button type="button" class="dk-pill dk-pill-speed">
+          <span class="dk-ctx-pair" data-el="speedPill">
+            <svg class="dk-svg" data-el="speedIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
+          </span>
+        </button>
+        <div class="dk-pop dk-speed-pop">
+          <div class="dk-speed-section">
+            <div class="dk-speed-row"><span data-k="speedLabel">Overall</span><span data-k="valSpeed">-- tok/s</span></div>
+            <div class="dk-speed-row"><span>Streaming</span><span data-k="valStreamSpeed">-- tok/s</span></div>
+            <div class="dk-speed-row"><span>TTFT</span><span data-k="valTtft">-- s</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dk-sep"></div>
+
       <!-- Merged Quota Capsule (5h + Weekly) + Popover -->
       <div class="dk-grp" data-el="grpQuota">
-        <div class="dk-pill dk-pill-quota">
+        <button type="button" class="dk-pill dk-pill-quota">
           <span class="dk-q-pair" data-el="pair5h">
             <svg class="dk-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
             <span class="dk-val" data-k="pill5h">--%</span>
@@ -499,37 +621,194 @@ function pageMount(d) {
             <svg class="dk-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             <span class="dk-val" data-k="pillWk">--%</span>
           </span>
-        </div>
+        </button>
         <div class="dk-pop dk-quota-pop" data-el="quotaPop"></div>
       </div>
     `;
 
-    for (const grp of root.querySelectorAll('.dk-grp')) {
-      grp.addEventListener('mouseenter', () => {
-        const pop = grp.querySelector('.dk-pop');
-        if (!pop) return;
-        pop.style.left = '';
-        const pr = pop.getBoundingClientRect();
-        if (pr.width <= 0) return;
-        const shift = Math.max(8 - pr.left, Math.min(0, window.innerWidth - 8 - pr.right));
-        if (shift !== 0) {
-          pop.style.left = grp.getBoundingClientRect().width / 2 + shift + 'px';
-        }
-      });
-      grp.addEventListener('mouseleave', () => {
-        const pop = grp.querySelector('.dk-pop');
-        if (pop) pop.style.left = '';
-      });
+    // The right strip mirrors the markup; the shared <style> lives in the left
+    // one, and style elements apply document-wide wherever they sit.
+    rootR.style.cssText = root.style.cssText;
+    rootR.innerHTML = root.innerHTML.replace(/<style>[\s\S]*?<\/style>/, '');
+
+    const closePopover = () => {
+      clearTimeout(root._openTimer);
+      clearTimeout(root._closeTimer);
+      const grp = root._activePopover;
+      if (grp) {
+        grp.removeAttribute('data-open');
+        grp.querySelector('.dk-pill').setAttribute('aria-expanded', 'false');
+      }
+      root._activePopover = null;
+    };
+    const placePopover = (grp) => {
+      const pop = grp.querySelector('.dk-pop');
+      if (!pop) return;
+      // Groups never animate. Only their buttons do, so repeated polls always
+      // measure the same anchor throughout opening, closing and dock changes.
+      const ar = grp.getBoundingClientRect();
+      if (ar.width <= 0 || ar.height <= 0) {
+        if (root._activePopover === grp) closePopover();
+        return;
+      }
+      const currentFooter = root._footer;
+      const card = currentFooter.closest('.surface-composer-card') || currentFooter.parentElement;
+      const bounds = card.getBoundingClientRect();
+      const minLeft = Math.max(8, bounds.left + 8);
+      const maxRight = Math.min(window.innerWidth - 8, bounds.right - 8);
+      pop.style.maxWidth = Math.max(0, maxRight - minLeft) + 'px';
+      const above = Math.max(0, ar.top - 16);
+      const below = Math.max(0, window.innerHeight - ar.bottom - 16);
+      const side = pop.scrollHeight > above && below > above ? 'bottom' : 'top';
+      pop.dataset.side = side;
+      pop.style.maxHeight = (side === 'top' ? above : below) + 'px';
+      pop.style.top = side === 'bottom' ? 'calc(100% + 8px)' : 'auto';
+      pop.style.bottom = side === 'top' ? 'calc(100% + 8px)' : 'auto';
+      pop.style.setProperty('--dk-enter-y', side === 'top' ? '4px' : '-4px');
+      const pw = pop.offsetWidth;
+      const ideal = grp.parentElement.dataset.pos === 'right'
+        ? ar.right - pw : ar.left + (ar.width - pw) / 2;
+      const left = Math.max(minLeft, Math.min(ideal, maxRight - pw));
+      pop.style.left = left - ar.left + 'px';
+    };
+
+    const placeAllPopovers = () => {
+      if (root._activePopover) placePopover(root._activePopover);
+    };
+    root._placePopovers = placeAllPopovers;
+    root._closePopover = closePopover;
+    const openPopover = (grp) => {
+      closePopover();
+      placePopover(grp);
+      root._activePopover = grp;
+      grp.dataset.open = 'true';
+      grp.querySelector('.dk-pill').setAttribute('aria-expanded', 'true');
+    };
+
+    for (const strip of [root, rootR]) {
+      for (const grp of strip.querySelectorAll('.dk-grp')) {
+        const pill = grp.querySelector('.dk-pill');
+        pill.setAttribute('aria-expanded', 'false');
+        pill.setAttribute('aria-label', { grpCtx: 'Context usage', grpSpeed: 'Generation speed', grpQuota: 'Model quota' }[grp.dataset.el]);
+        grp.querySelector('.dk-pop').setAttribute('role', 'tooltip');
+        grp.addEventListener('mouseenter', () => {
+          clearTimeout(root._closeTimer);
+          clearTimeout(root._openTimer);
+          if (root._activePopover) openPopover(grp);
+          else root._openTimer = setTimeout(() => { if (grp.isConnected && grp.matches(':hover')) openPopover(grp); }, 120);
+        });
+        grp.addEventListener('mouseleave', () => {
+          clearTimeout(root._openTimer);
+          if (!grp.contains(document.activeElement)) root._closeTimer = setTimeout(closePopover, 80);
+        });
+        grp.addEventListener('focusin', () => openPopover(grp));
+        grp.addEventListener('focusout', (ev) => { if (!grp.contains(ev.relatedTarget)) closePopover(); });
+        pill.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); closePopover(); } });
+      }
     }
+    const reposition = () => {
+      if (!root.isConnected) { root._dispose(); return; }
+      if (!root._popoverFrame) root._popoverFrame = requestAnimationFrame(() => { root._popoverFrame = 0; placeAllPopovers(); });
+    };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    root._dispose = () => {
+      closePopover();
+      cancelAnimationFrame(root._popoverFrame);
+      cancelAnimationFrame(root._layoutFrame);
+      root._modelObserver?.disconnect();
+      root._resizeObserver?.disconnect();
+      root._observedFooter = null;
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+      root._animationLayer?.remove();
+      root._animationLayer = null;
+    };
+  }
+  root._footer = footer;
+  if (settingsChanged) root._closePopover();
+
+  // Settings arrive with every poll from the sidecar's settings.json.
+  const st = d.settings || {};
+  const onCtx = st.context !== false;
+  const onSpeed = st.speed !== false;
+  const on5h = st.quota5h !== false;
+  const onWk = st.quotaWeekly !== false;
+  const sideOf = (v) => (v === 'right' ? 'right' : 'left');
+  const pos = {
+    ctx: sideOf(st.contextSide),
+    speed: sideOf(st.speedSide),
+    quota: sideOf(st.quotaSide),
+  };
+
+  for (const el of [root, rootR]) {
+    el.classList.toggle('dk-off-ctx', !onCtx);
+    el.classList.toggle('dk-off-speed', !onSpeed);
+    el.classList.toggle('dk-off-5h', !on5h);
+    el.classList.toggle('dk-off-wk', !onWk);
+    el.classList.toggle('dk-off-quota', !on5h && !onWk);
+    el.classList.toggle('dk-off-all', !onCtx && !onSpeed && !on5h && !onWk);
   }
 
-  if (!footerLeft.contains(root)) {
-    footerLeft.appendChild(root);
+  // Own the space between native clusters; never insert into their button order.
+  const rightHost = Array.from(footer.children).findLast((el) =>
+    el !== footerLeft && el.id !== 'deck-metrics-dock' && !el.id.startsWith('deck-metrics-strip'));
+  let dock = document.getElementById('deck-metrics-dock');
+  if (!dock) {
+    dock = document.createElement('div');
+    dock.id = 'deck-metrics-dock';
+  }
+  let spacer = dock.querySelector('#deck-metrics-spacer');
+  if (!spacer) { spacer = document.createElement('div'); spacer.id = 'deck-metrics-spacer'; }
+  if (dock.parentElement !== footer || dock.nextElementSibling !== (rightHost || null)) footer.insertBefore(dock, rightHost || null);
+  if (root.parentElement !== dock) dock.prepend(root);
+  if (spacer.parentElement !== dock) dock.appendChild(spacer);
+  if (rootR.parentElement !== dock) dock.appendChild(rootR);
+  footer.classList.toggle('dk-composer-footer', onCtx || onSpeed || on5h || onWk);
+  footerLeft.classList.add('dk-native-left');
+  rightHost?.classList.add('dk-native-right');
+
+  // Sample the host's text control, excluding the large circular send/voice keys.
+  const nativeControl = Array.from(footerLeft.querySelectorAll('button, [role="button"]')).find((el) => el.textContent.trim());
+  const controlStyle = getComputedStyle(nativeControl || footerLeft);
+  const iconStyle = nativeControl?.querySelector('svg') ? getComputedStyle(nativeControl.querySelector('svg')) : null;
+  const controlHeight = parseFloat(controlStyle.height);
+  for (const strip of [root, rootR]) {
+    strip.style.fontFamily = controlStyle.fontFamily;
+    strip.style.fontSize = controlStyle.fontSize;
+    strip.style.fontWeight = controlStyle.fontWeight;
+    strip.style.lineHeight = controlStyle.lineHeight;
+    strip.style.color = controlStyle.color;
+    strip.style.setProperty('--dk-control-height', controlHeight >= 20 && controlHeight <= 40 ? controlHeight + 'px' : '28px');
+    strip.style.setProperty('--dk-control-radius', nativeControl ? controlStyle.borderRadius : '6px');
+    strip.style.setProperty('--dk-control-padding', nativeControl ? controlStyle.paddingLeft : '6px');
+    strip.style.setProperty('--dk-icon-size', iconStyle?.width || '16px');
   }
 
+  // Each capsule lives on one side only: hide it in the other strip.
+  for (const [strip, mine] of [[root, 'left'], [rootR, 'right']]) {
+    strip.dataset.pos = mine;
+    let shown = 0;
+    for (const key of ['ctx', 'speed', 'quota']) {
+      const enabled = key === 'ctx' ? onCtx : key === 'speed' ? onSpeed : on5h || onWk;
+      const away = pos[key] !== mine || !enabled;
+      strip.classList.toggle('dk-away-' + key, away);
+      if (!away) shown++;
+    }
+    const hasReadout = (onCtx && pos.ctx === mine) || (onSpeed && pos.speed === mine);
+    strip.classList.toggle('dk-nosep', !hasReadout || pos.quota !== mine || (!on5h && !onWk));
+    strip.classList.toggle('dk-empty', shown === 0);
+  }
+  dock.classList.toggle('dk-dock-empty', !onCtx && !onSpeed && !on5h && !onWk);
+
+  const strips = [root, rootR];
   const setK = (k, val) => {
-    const el = root.querySelector(`[data-k="${k}"]`);
-    if (el && el.textContent !== val) el.textContent = val;
+    // Both strips carry the same markup, so update every copy.
+    for (const strip of strips) {
+      for (const el of strip.querySelectorAll(`[data-k="${k}"]`)) {
+        if (el.textContent !== val) el.textContent = val;
+      }
+    }
   };
 
   setK('pillCtx', d.pillCtx);
@@ -539,8 +818,10 @@ function pageMount(d) {
   setK('valTtft', d.ttftText);
   setK('speedLabel', d.speedLabel);
   // Clear native tooltips left by earlier injector versions, including hot reloads.
-  for (const el of root.querySelectorAll('[data-el="speedPill"][title], [data-el="speedSection"][title]')) {
-    el.removeAttribute('title');
+  for (const strip of strips) {
+    for (const el of strip.querySelectorAll('[data-el="speedPill"][title], [data-el="speedSection"][title]')) {
+      el.removeAttribute('title');
+    }
   }
   setK('usedPctText', d.usedPctText);
   setK('usedFrac', d.usedFrac);
@@ -612,208 +893,164 @@ function pageMount(d) {
   root._applyModelQuota = applyModelQuota;
   const modelText = applyModelQuota();
 
-  const getNativeVisualInfo = (el) => {
-    let maxR = -Infinity;
-    let svgClipped = false;
-    const walk = (node, parentClip) => {
-      const cs = getComputedStyle(node);
-      if (cs.display === 'none') return;
-      if (cs.display === 'contents') {
-        for (const child of node.children) walk(child, parentClip);
-        return;
+  const nativeChildren = Array.from(footerLeft.children);
+  const modelTargets = nativeChildren.filter((el) => el.textContent.trim());
+  const syncSqueezeClasses = (compress) => {
+    footerLeft.classList.toggle('dk-fl-squeezed', !!compress);
+    for (const target of modelTargets) {
+      target.classList.toggle('dk-model-squeezed', !!compress);
+      target.classList.toggle('dk-model-squeezed-hard', compress === 'hard');
+      for (const el of [target, ...target.querySelectorAll('div, span, button, a, p, label')]) {
+        const text = el.textContent.trim();
+        el.classList.toggle('dk-squeeze-box', !!compress && !!text && (el.children.length > 0 || text.length > 5));
+        el.classList.toggle('dk-squeeze-item', !!compress && !!text && el.children.length === 0 && text.length <= 5);
       }
-      const tag = node.tagName ? node.tagName.toLowerCase() : '';
-      const r = node.getBoundingClientRect();
-      if (r.width > 0 || r.height > 0) {
-        if (tag === 'svg') {
-          if (parentClip < Infinity && r.width > 0 && r.right > parentClip + 1) {
-            svgClipped = true;
-          }
-          const visR = Math.min(r.right, parentClip);
-          if (visR > maxR) maxR = visR;
-          return;
-        }
-        const visR = Math.min(r.right, parentClip);
-        if (visR > maxR) maxR = visR;
-        const ownClip = cs.overflowX === 'hidden' || cs.overflowX === 'clip' ? r.right : Infinity;
-        const nextClip = Math.min(parentClip, ownClip);
-        if (cs.overflowX === 'visible' && node.scrollWidth > node.clientWidth + 1) {
-          const overflowR = Math.min(r.left + node.scrollWidth, parentClip);
-          if (overflowR > maxR) maxR = overflowR;
-        }
-        for (const child of node.children) walk(child, nextClip);
-      } else {
-        for (const child of node.children) walk(child, parentClip);
-      }
-    };
-    walk(el, Infinity);
-    return { maxR, svgClipped };
+    }
   };
-
   const adjustLayout = () => {
-    const footer = footerLeft.parentElement;
-    const nativeChildren = Array.from(footerLeft.children).filter((c) => c !== root);
-    const modelTargets = nativeChildren.filter((c) => c.textContent && c.textContent.trim().length > 0);
-
-    const isClippedEl = (el) => {
-      if (el instanceof SVGElement) return false;
-      if (el.scrollWidth <= el.clientWidth + 1) return false;
-      const r = el.getBoundingClientRect();
-      return r.height > 0 && el.getClientRects().length > 0;
-    };
-
-    const isNativeSqueezed = () => {
-      for (const c of nativeChildren) {
-        if (isClippedEl(c)) return true;
-        for (const node of c.querySelectorAll('*')) {
-          if (isClippedEl(node)) return true;
-        }
-      }
-      return false;
-    };
-
-    const syncSqueezeClasses = (compress) => {
-      footerLeft.classList.toggle('dk-fl-squeezed', !!compress);
-      for (const mt of modelTargets) {
-        mt.classList.toggle('dk-model-squeezed', !!compress);
-        mt.classList.toggle('dk-model-squeezed-hard', compress === 'hard');
-        if (!compress) {
-          mt.classList.remove('dk-squeeze-box', 'dk-squeeze-item');
-          for (const el of mt.querySelectorAll('.dk-squeeze-box, .dk-squeeze-item')) {
-            el.classList.remove('dk-squeeze-box', 'dk-squeeze-item');
-          }
-          continue;
-        }
-        const tag = (el) => {
-          const txt = el.textContent ? el.textContent.trim() : '';
-          if (!txt) {
-            el.classList.remove('dk-squeeze-box', 'dk-squeeze-item');
-            return;
-          }
-          const isBoxOrLong = el.children.length > 0 || txt.length > 5;
-          el.classList.toggle('dk-squeeze-box', isBoxOrLong);
-          el.classList.toggle('dk-squeeze-item', !isBoxOrLong);
-        };
-        tag(mt);
-        for (const el of mt.querySelectorAll('div, span, button, a, p, label')) tag(el);
-      }
-    };
-
-    const compactCls = root.dataset.preferWkOnly === '1' ? 'dk-hide-5h' : 'dk-hide-wk';
+    if (!root.isConnected) return;
+    dock.style.minWidth = '0px';
+    if (!onCtx && !onSpeed && !on5h && !onWk) { syncSqueezeClasses(''); root._placePopovers(); return; }
+    const compact = !on5h || root.dataset.preferWkOnly === '1' ? 'dk-hide-5h' : 'dk-hide-wk';
     const modeClasses = ['dk-hide-speed', 'dk-hide-wk', 'dk-hide-5h', 'dk-hide-qval', 'dk-hide-cval', 'dk-hide-quota', 'dk-hide-all'];
     const modes = [
       { classes: [], compress: '' },
       { classes: ['dk-hide-speed'], compress: '' },
-      { classes: ['dk-hide-speed', compactCls], compress: '' },
-      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval'], compress: '' },
-      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: '' },
-      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'soft' },
-      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'hard' },
+      { classes: ['dk-hide-speed', compact], compress: '' },
+      { classes: ['dk-hide-speed', compact, 'dk-hide-qval'], compress: '' },
+      { classes: ['dk-hide-speed', compact, 'dk-hide-qval', 'dk-hide-cval'], compress: '' },
+      { classes: ['dk-hide-speed', compact, 'dk-hide-qval', 'dk-hide-cval'], compress: 'soft' },
+      { classes: ['dk-hide-speed', compact, 'dk-hide-qval', 'dk-hide-cval'], compress: 'hard' },
       { classes: ['dk-hide-speed', 'dk-hide-cval', 'dk-hide-quota'], compress: 'hard' },
-      { classes: ['dk-hide-all'], compress: '' },
+      { classes: ['dk-hide-all'], compress: 'hard' },
     ];
-
     for (const mode of modes) {
-      for (const cls of modeClasses) {
-        root.classList.toggle(cls, mode.classes.includes(cls));
+      for (const strip of strips) {
+        for (const cls of modeClasses) strip.classList.toggle(cls, mode.classes.includes(cls));
       }
       syncSqueezeClasses(mode.compress);
-      if (mode.classes.includes('dk-hide-all')) break;
-
-      const rootRect = root.getBoundingClientRect();
-      if (rootRect.width <= 0) continue;
-
-      const rightControls = footer
-        ? Array.from(footer.children).filter((el) => el !== footerLeft && el.getBoundingClientRect().width > 0)
-        : [];
-      const rightMinLeft =
-        rightControls.length > 0
-          ? Math.min(...rightControls.map((el) => el.getBoundingClientRect().left))
-          : Infinity;
-      const footerCs = footer ? getComputedStyle(footer) : null;
-      const footerRightEdge = footer
-        ? footer.getBoundingClientRect().right - (parseFloat(footerCs.paddingRight) || 0)
-        : Infinity;
-      const flCs = getComputedStyle(footerLeft);
-      const flClipRight = flCs.overflowX !== 'visible' ? footerLeft.getBoundingClientRect().right + 1 : Infinity;
-      const minRightBound = Math.min(rightMinLeft, footerRightEdge, flClipRight);
-
-      let nativeMaxRight = -Infinity;
-      let anySvgClipped = false;
-      for (const c of nativeChildren) {
-        const info = getNativeVisualInfo(c);
-        if (info.maxR > nativeMaxRight) nativeMaxRight = info.maxR;
-        if (info.svgClipped) anySvgClipped = true;
-      }
-
-      const fitsRight =
-        rootRect.right <= rightMinLeft - 4 &&
-        rootRect.right <= footerRightEdge + 1 &&
-        rootRect.right <= flClipRight;
-      const fitsLeft = nativeMaxRight === -Infinity || rootRect.left >= nativeMaxRight + 3;
-      const crowdedModel = !mode.compress && minRightBound - rootRect.right < 24 && isNativeSqueezed();
-      if (fitsRight && fitsLeft && !(mode.compress && anySvgClipped) && !crowdedModel) break;
+      // Only measure layout boxes. Popover overflow and in-flight button
+      // animations must not change which responsive mode fits on the next poll.
+      const needed = root.offsetWidth + rootR.offsetWidth + (root.offsetWidth && rootR.offsetWidth ? 8 : 0);
+      if (mode.compress) dock.style.minWidth = needed + 'px';
+      const fr = footer.getBoundingClientRect();
+      const rr = rightHost?.getBoundingClientRect();
+      const controlsFit = !rr || rr.right <= fr.right + 1;
+      const modelFits = !!mode.compress || footerLeft.scrollWidth <= footerLeft.clientWidth + 1;
+      if (needed <= dock.clientWidth + 1 && controlsFit && modelFits) break;
     }
+    root._placePopovers();
   };
   root._adjustLayout = adjustLayout;
 
-  if (root._observedFooterLeft !== footerLeft) {
-    if (root._modelObserver) root._modelObserver.disconnect();
-    if (root._resizeObserver) root._resizeObserver.disconnect();
-    root._observedFooterLeft = footerLeft;
-
-    const obs = new MutationObserver((mutations) => {
-      if (mutations.every((m) => root.contains(m.target))) return;
-      if (root._applyModelQuota) root._applyModelQuota();
-      if (root._adjustLayout) root._adjustLayout();
-    });
-    obs.observe(footerLeft, { subtree: true, characterData: true, childList: true });
-    root._modelObserver = obs;
-
-    if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => {
-        if (root._adjustLayout) root._adjustLayout();
+  if (root._observedFooter !== footer) {
+    root._modelObserver?.disconnect();
+    root._resizeObserver?.disconnect();
+    root._observedFooter = footer;
+    const scheduleLayout = () => {
+      if (root._layoutFrame) return;
+      root._layoutFrame = requestAnimationFrame(() => {
+        root._layoutFrame = 0;
+        root._applyModelQuota();
+        root._adjustLayout();
       });
-      if (footerLeft.parentElement) ro.observe(footerLeft.parentElement);
-      ro.observe(footerLeft);
-      root._resizeObserver = ro;
+    };
+    root._modelObserver = new MutationObserver((mutations) => {
+      if (mutations.some((m) => !dock.contains(m.target) && m.target !== dock)) scheduleLayout();
+    });
+    root._modelObserver.observe(footer, { subtree: true, characterData: true, childList: true });
+    if (typeof ResizeObserver !== 'undefined') {
+      root._resizeObserver = new ResizeObserver(scheduleLayout);
+      for (const el of [footer, footerLeft, dock, rightHost]) if (el) root._resizeObserver.observe(el);
     }
   }
 
-  // Update progress bar & cache cooling indicator
-  const segRead = root.querySelector('[data-el="segRead"]');
-  const segOut = root.querySelector('[data-el="segOut"]');
-  const segThink = root.querySelector('[data-el="segThink"]');
-  const segTurn0 = root.querySelector('[data-el="segTurn0"]');
-  const dotCached = root.querySelector('[data-el="dotCached"]');
-  const ctxIconSvg = root.querySelector('[data-el="ctxIconSvg"]');
+  // Update progress bar & cache cooling indicator (both strips carry a copy)
+  for (const strip of strips) {
+    const segRead = strip.querySelector('[data-el="segRead"]');
+    const segOut = strip.querySelector('[data-el="segOut"]');
+    const segThink = strip.querySelector('[data-el="segThink"]');
+    const segTurn0 = strip.querySelector('[data-el="segTurn0"]');
+    const dotCached = strip.querySelector('[data-el="dotCached"]');
+    const ctxIconSvg = strip.querySelector('[data-el="ctxIconSvg"]');
 
-  if (segRead) segRead.style.width = d.segReadW;
-  if (segOut) segOut.style.width = d.segOutW;
-  if (segThink) segThink.style.width = d.segThinkW;
-  if (segTurn0) segTurn0.style.width = d.segTurn0W;
-  if (ctxIconSvg) ctxIconSvg.style.color = d.ctxIconColor || '';
-  if (dotCached && dotCached.innerHTML !== d.cacheIconSvg) {
-    dotCached.innerHTML = d.cacheIconSvg;
-  }
-  const valCacheHitEl = root.querySelector('[data-el="valCacheHitEl"]');
-  if (valCacheHitEl) {
-    valCacheHitEl.style.color = d.cacheValColor;
-    valCacheHitEl.style.textDecoration = d.cacheValDeco;
-    valCacheHitEl.style.opacity = d.cacheValOp;
-  }
-  const valCacheHitKEl = root.querySelector('[data-k="valCacheHitK"]');
-  if (valCacheHitKEl) {
-    valCacheHitKEl.style.color = d.cacheValColor;
-  }
+    if (segRead) segRead.style.width = d.segReadW;
+    if (segOut) segOut.style.width = d.segOutW;
+    if (segThink) segThink.style.width = d.segThinkW;
+    if (segTurn0) segTurn0.style.width = d.segTurn0W;
+    if (ctxIconSvg) ctxIconSvg.style.color = d.ctxIconColor || '';
+    if (dotCached && dotCached.innerHTML !== d.cacheIconSvg) {
+      dotCached.innerHTML = d.cacheIconSvg;
+    }
+    const valCacheHitEl = strip.querySelector('[data-el="valCacheHitEl"]');
+    if (valCacheHitEl) {
+      valCacheHitEl.style.color = d.cacheValColor;
+      valCacheHitEl.style.textDecoration = d.cacheValDeco;
+      valCacheHitEl.style.opacity = d.cacheValOp;
+    }
+    for (const el of strip.querySelectorAll('[data-k="valCacheHitK"]')) {
+      el.style.color = d.cacheValColor;
+    }
 
-  // Update Quota Popover HTML
-  const quotaPop = root.querySelector('[data-el="quotaPop"]');
-  if (quotaPop && quotaPop.innerHTML !== d.quotaHtml) {
-    quotaPop.innerHTML = d.quotaHtml;
+    // Update Quota Popover HTML
+    const quotaPop = strip.querySelector('[data-el="quotaPop"]');
+    if (quotaPop && quotaPop.innerHTML !== d.quotaHtml) {
+      quotaPop.innerHTML = d.quotaHtml;
+    }
   }
 
   adjustLayout();
+  root._settingsKey = settingsKey;
+  if (settingsChanged && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const visible = new Set();
+    for (const strip of strips) {
+      for (const grp of strip.querySelectorAll('.dk-grp')) {
+        const pill = grp.querySelector('.dk-pill');
+        const rect = grp.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        visible.add(grp.dataset.el);
+        const previous = previousCapsules.get(grp.dataset.el);
+        const dx = previous ? previous.rect.left - rect.left : 0;
+        const dy = previous ? previous.rect.top - rect.top : 3;
+        if (!previous || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 || Math.abs(previous.rect.width - rect.width) > 0.5) {
+          pill.animate([
+            { opacity: previous ? 1 : 0, transform: `translate(${dx}px, ${dy}px)` },
+            { opacity: 1, transform: 'none' },
+          ], { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+        }
+      }
+    }
+    for (const [key, previous] of previousCapsules) {
+      if (visible.has(key)) continue;
+      const ghost = previous.pill;
+      ghost.dataset.dkGhost = '';
+      ghost.removeAttribute('aria-expanded');
+      ghost.removeAttribute('id');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.tabIndex = -1;
+      Object.assign(ghost.style, {
+        position: 'fixed', left: previous.rect.left + 'px', top: previous.rect.top + 'px',
+        width: previous.rect.width + 'px', height: previous.rect.height + 'px',
+        pointerEvents: 'none', zIndex: '999998', margin: '0',
+      });
+      if (!root._animationLayer) {
+        const layer = document.createElement('div');
+        layer.id = 'deck-metrics-strip-animations';
+        layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:999998';
+        document.body.appendChild(layer);
+        root._animationLayer = layer;
+      }
+      const layer = root._animationLayer;
+      layer.style.fontFamily = controlStyle.fontFamily;
+      layer.style.fontSize = controlStyle.fontSize;
+      layer.style.fontWeight = controlStyle.fontWeight;
+      layer.style.lineHeight = controlStyle.lineHeight;
+      layer.style.color = controlStyle.color;
+      layer.appendChild(ghost);
+      const animation = ghost.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(3px)' }], { duration: 120, easing: 'ease-out' });
+      animation.finished.then(() => ghost.remove(), () => ghost.remove());
+    }
+  }
 
   return 'ok:' + modelText;
 }
@@ -1006,6 +1243,7 @@ function toView(d) {
     valTurn0: turn0Pct + ' · ' + fmtK(turn0),
     quotaSummaryGroups,
     quotaHtml,
+    settings: getSettings(),
     instanceTs: INSTANCE_TS,
   };
 }

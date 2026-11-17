@@ -5,6 +5,16 @@
   ],
   "description": "Real-time context window and token usage monitor reading ground-truth API telemetry from local conversation databases",
   "display_name": "agy-capsule",
-  "has_web_ui": false,
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "agy-capsule",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "agy-capsule"
+      }
+    ]
+  },
   "restart_policy": "always"
 }

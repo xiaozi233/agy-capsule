@@ -4,6 +4,8 @@ import { readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, basename } from 'node:path';
 import { startDeckInjector, speedToView } from './deck_injector.mjs';
+import { getSettings, saveSettings } from './settings.mjs';
+import { SETTINGS_HTML } from './settings_page.mjs';
 
 const CONV_DIR = join(homedir(), '.gemini', 'antigravity', 'conversations');
 
@@ -815,9 +817,14 @@ export { inspectConversation };
 
 if (process.env.ANTIGRAVITY_SIDECAR_WEB_PORT) {
   const app = new SidecarApp();
-  app.page('/', () => UI_HTML);
+  // The built-in swarm sidecar registers its view at "/", so serve the settings
+  // pane there too: whichever path the host loads, it lands on the panel.
+  app.page('/', () => SETTINGS_HTML);
+  app.page('/settings', () => SETTINGS_HTML);
   app.page('/ui.html', () => UI_HTML);
   app.api('/api/context', (data) => inspectConversation(data?.conversationId || app.config.conversationId), 'GET');
+  app.api('/api/settings', () => getSettings(), 'GET');
+  app.api('/api/settings/save', (data) => saveSettings(data));
   app.run();
 }
 if (process.env.ANTIGRAVITY_LS_ADDRESS || process.env.ANTIGRAVITY_SIDECAR_WEB_PORT) {
