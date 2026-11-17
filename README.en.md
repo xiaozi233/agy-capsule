@@ -2,7 +2,7 @@
 
 [中文](./README.md) | **English**
 
-Context and quota capsules in the Antigravity composer footer.
+Context, quota, and generation speed capsules in the Antigravity composer footer.
 
 <p align="center">
   <img src="assets/composer-quota-light.png" width="100%" alt="Light composer with inline capsules and multi-model quota panel" />
@@ -13,11 +13,12 @@ Context and quota capsules in the Antigravity composer footer.
 
 ## Features
 
-- **Inline dual capsules**: Embedded in the composer footer to show the current session's context usage against the model's live context limit (e.g. `256k` / `512k`, or `0 / --` before the first turn) and remaining 5h / Weekly quotas in real time.
+- **Inline capsules**: Embedded in the composer footer to show the current session's context usage against the model's live context limit (e.g. `256k` / `512k`, or `0 / --` before the first turn) and remaining 5h / Weekly quotas in real time.
 - **Token breakdown**: Hover to see the proportions and token counts for `Turn0`, `Read`, `Think`, and `Write`.
+- **Generation speed**: Following [agy-tool](https://github.com/justhil/agy-tool), show overall speed (output tokens including thinking / (time to first token + streaming duration), e.g. `42.1 tok/s`) inline. Hover for streaming speed (response tokens / streaming duration) and time to first token (`TTFT`). Keep the previous completed reading marked `prev.` in the popover while a new request has no usage; missing telemetry displays `-- tok/s`. On narrow footers, the speed folds away but remains in the context hover popover.
 - **Cache expiry alerts**: Turn yellow 3 minutes after the last turn with a countdown (`~1m`), and turn red at 4 minutes to mark `Cache` as expired.
 - **Multi-model quota panel**: Automatically match the model selected in the footer (such as `Gemini`, `Claude`, `Argon`, or `Carbon`). Hover to see each group's remaining 5h and weekly quotas, plus reset countdowns.
-- **Responsive narrow layout**: Degrades progressively as the footer narrows (hide Weekly quota first, keep icons with hover popovers, then ellipsis-truncate the model selector) to prevent overlap.
+- **Responsive narrow layout**: Degrades progressively as the footer narrows (hide speed, then Weekly quota, keep icons with hover popovers, then ellipsis-truncate the model selector) to prevent overlap.
 - **Local font fallbacks**: Prefer Source Han Sans, falling back to the system UI font when unavailable; no font downloads or extra installation required.
 - **Light / dark adaptation & cross-version compatibility**: Reuse the host's CSS variables directly; mount via a native Sidecar and CDP without modifying client source code, so it keeps working after client updates.
 

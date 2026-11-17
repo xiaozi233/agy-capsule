@@ -99,8 +99,8 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '40') {
-    root.setAttribute('data-deck-ver', '40');
+  if (root.getAttribute('data-deck-ver') !== '42') {
+    root.setAttribute('data-deck-ver', '42');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -126,8 +126,8 @@ function pageMount(d) {
         #deck-metrics-strip .dk-grp {
           display: inline-flex;
           align-items: center;
-          /* Both popovers anchor to the shared metrics strip. */
-          position: static;
+          /* Anchor each popover to its own capsule. */
+          position: relative;
         }
         #deck-metrics-strip .dk-pill {
           display: inline-flex;
@@ -152,6 +152,9 @@ function pageMount(d) {
         }
         #deck-metrics-strip .dk-pill-quota {
           gap: 10px;
+        }
+        #deck-metrics-strip.dk-hide-speed [data-el="speedPill"] {
+          display: none;
         }
         #deck-metrics-strip.dk-hide-wk [data-el="pairWk"],
         #deck-metrics-strip.dk-hide-5h [data-el="pair5h"] {
@@ -362,6 +365,20 @@ function pageMount(d) {
           font-variant-numeric: tabular-nums;
           font-size: 13.5px;
         }
+        #deck-metrics-strip .dk-speed-section {
+          margin-top: 8px;
+          padding-top: 7px;
+          border-top: 1px solid rgba(142, 142, 147, 0.18);
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+        #deck-metrics-strip .dk-speed-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 4px;
+        }
+        #deck-metrics-strip .dk-speed-row:first-child { margin-top: 0; }
         /* Quota Popover (matches plugin UI) */
         #deck-metrics-strip .dk-quota-pop {
           width: max-content;
@@ -417,6 +434,9 @@ function pageMount(d) {
           <svg class="dk-svg" data-el="ctxIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
           <span class="dk-val" data-k="pillCtx">--%</span>
         </div>
+        <div class="dk-pill" data-el="speedPill">
+          <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
+        </div>
         <div class="dk-pop dk-ctx-pop">
           <div class="dk-cache-bar" data-el="rowCacheHit">
             <div class="dk-cache-left"><span class="dk-dot" data-el="dotCached" style="display:inline-flex;align-items:center;justify-content:center;background:transparent"></span><span>Cache</span><span class="dk-cache-pct" data-k="valCacheHit" data-el="valCacheHitEl">0%</span></div>
@@ -453,6 +473,11 @@ function pageMount(d) {
               <div class="dk-item-pct" data-k="valOutPct">0%</div>
               <div class="dk-item-k" data-k="valOutK">0.0k</div>
             </div>
+          </div>
+          <div class="dk-speed-section" data-el="speedSection">
+            <div class="dk-speed-row"><span data-k="speedLabel">Overall</span><span data-k="valSpeed">-- tok/s</span></div>
+            <div class="dk-speed-row"><span>Streaming</span><span data-k="valStreamSpeed">-- tok/s</span></div>
+            <div class="dk-speed-row"><span>TTFT</span><span data-k="valTtft">-- s</span></div>
           </div>
         </div>
       </div>
@@ -502,6 +527,15 @@ function pageMount(d) {
   };
 
   setK('pillCtx', d.pillCtx);
+  setK('pillSpeed', d.speedText);
+  setK('valSpeed', d.speedText);
+  setK('valStreamSpeed', d.streamSpeedText);
+  setK('valTtft', d.ttftText);
+  setK('speedLabel', d.speedLabel);
+  // Clear native tooltips left by earlier injector versions, including hot reloads.
+  for (const el of root.querySelectorAll('[data-el="speedPill"][title], [data-el="speedSection"][title]')) {
+    el.removeAttribute('title');
+  }
   setK('usedPctText', d.usedPctText);
   setK('usedFrac', d.usedFrac);
   setK('valCacheHit', d.valCacheHit);
@@ -660,15 +694,16 @@ function pageMount(d) {
     };
 
     const compactCls = root.dataset.preferWkOnly === '1' ? 'dk-hide-5h' : 'dk-hide-wk';
-    const modeClasses = ['dk-hide-wk', 'dk-hide-5h', 'dk-hide-qval', 'dk-hide-cval', 'dk-hide-quota', 'dk-hide-all'];
+    const modeClasses = ['dk-hide-speed', 'dk-hide-wk', 'dk-hide-5h', 'dk-hide-qval', 'dk-hide-cval', 'dk-hide-quota', 'dk-hide-all'];
     const modes = [
       { classes: [], compress: '' },
-      { classes: [compactCls], compress: '' },
-      { classes: [compactCls, 'dk-hide-qval'], compress: '' },
-      { classes: [compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: '' },
-      { classes: [compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'soft' },
-      { classes: [compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'hard' },
-      { classes: ['dk-hide-cval', 'dk-hide-quota'], compress: 'hard' },
+      { classes: ['dk-hide-speed'], compress: '' },
+      { classes: ['dk-hide-speed', compactCls], compress: '' },
+      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval'], compress: '' },
+      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: '' },
+      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'soft' },
+      { classes: ['dk-hide-speed', compactCls, 'dk-hide-qval', 'dk-hide-cval'], compress: 'hard' },
+      { classes: ['dk-hide-speed', 'dk-hide-cval', 'dk-hide-quota'], compress: 'hard' },
       { classes: ['dk-hide-all'], compress: '' },
     ];
 
@@ -825,6 +860,21 @@ function formatGroupTitle(raw) {
   return s;
 }
 
+// Self-contained so the sidecar page can reuse the same labels and formatting.
+function speedToView(d) {
+  const formatRate = (n) => Number.isFinite(n) && n > 0 ? n.toFixed(1) + ' tok/s' : '-- tok/s';
+  const speedText = formatRate(d.tokensPerSecond);
+  const streamSpeedText = formatRate(d.streamingTokensPerSecond);
+  const ttftText = Number.isFinite(d.timeToFirstTokenSeconds) && d.timeToFirstTokenSeconds >= 0
+    ? d.timeToFirstTokenSeconds.toFixed(2) + ' s' : '-- s';
+  return {
+    speedText,
+    streamSpeedText,
+    ttftText,
+    speedLabel: d.speedFromPreviousGeneration ? 'Overall (prev.)' : 'Overall',
+  };
+}
+
 function toView(d) {
   const maxCtx = d.maxContextTokens || 0;
   const ctx = d.contextTokens || 0;
@@ -922,6 +972,7 @@ function toView(d) {
 
   return {
     pillCtx: hasMax ? usedPctRound + '%' : (ctx === 0 ? '0%' : '--%'),
+    ...speedToView(d),
     ctxIconColor,
     usedPctText: hasMax ? usedPctRound + '% used' : (ctx === 0 ? '0% used' : '--% used'),
     usedFrac: fmtK(ctx) + ' / ' + (hasMax ? fmtK(maxCtx) : '--'),
@@ -984,7 +1035,7 @@ async function tick(inspect) {
   }
 }
 
-export { pageMount, toView };
+export { pageMount, toView, speedToView };
 
 export function startDeckInjector(inspect) {
   let busy = false;

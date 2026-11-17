@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, basename } from 'node:path';
-import { startDeckInjector } from './deck_injector.mjs';
+import { startDeckInjector, speedToView } from './deck_injector.mjs';
 
 const CONV_DIR = join(homedir(), '.gemini', 'antigravity', 'conversations');
 
@@ -100,6 +100,17 @@ function parsePbMap(buf) {
   return fields;
 }
 
+function parseDurationSeconds(buf) {
+  if (!Buffer.isBuffer(buf)) return null;
+  const duration = parsePbMap(buf);
+  const seconds = duration.get(1)?.[0] ?? 0;
+  const nanos = duration.get(2)?.[0] ?? 0;
+  if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > 315576000000 ||
+      !Number.isInteger(nanos) || nanos < 0 || nanos >= 1e9) return null;
+  const total = seconds + nanos / 1e9;
+  return total;
+}
+
 function parseGenRow(idx, data) {
   if (!data || !Buffer.isBuffer(data)) data = Buffer.from(data || []);
   const top = parsePbMap(data);
@@ -113,6 +124,21 @@ function parseGenRow(idx, data) {
   const thinkTokens = usage.has(9) ? usage.get(9)[0] : 0;
   const outTokens = usage.has(10) ? usage.get(10)[0] : 0;
   const contextTokens = uncachedIn + cachedIn;
+
+  // ModelUsageStats.output_tokens includes thinking. Older providers may omit
+  // the separate thinking/response counts, so prefer the reported total.
+  const generationTokens = usage.get(3)?.[0] ?? (outTokens + thinkTokens);
+  // ChatModelMetadata.streaming_duration is a protobuf Duration (seconds/nanos).
+  // Match agy-tool's overall/streaming split: overall includes TTFT and thinking,
+  // while streaming uses response tokens when available.
+  const timeToFirstTokenSeconds = parseDurationSeconds(m1.get(11)?.[0]);
+  const streamingSeconds = parseDurationSeconds(m1.get(12)?.[0]);
+  const generationSeconds = streamingSeconds === null ? null : (timeToFirstTokenSeconds ?? 0) + streamingSeconds;
+  const hasTokens = Number.isSafeInteger(generationTokens) && generationTokens > 0;
+  const responseTokens = outTokens > 0 ? outTokens : Math.max(0, generationTokens - thinkTokens);
+  const streamTokens = responseTokens > 0 ? responseTokens : generationTokens;
+  const tokensPerSecond = hasTokens && generationSeconds >= 0.04 ? generationTokens / generationSeconds : null;
+  const streamingTokensPerSecond = hasTokens && streamingSeconds >= 0.03 ? streamTokens / streamingSeconds : null;
 
   let maxContextTokens = 0;
   if (m1.has(9)) {
@@ -147,6 +173,12 @@ function parseGenRow(idx, data) {
     thinkTokens,
     maxContextTokens,
     lastStepIndex,
+    generationTokens,
+    timeToFirstTokenSeconds,
+    streamingSeconds,
+    generationSeconds,
+    tokensPerSecond,
+    streamingTokensPerSecond,
   };
 }
 
@@ -169,7 +201,7 @@ function resolveLatestConvId(preferredId) {
 
 async function makeEmptyContextResult() {
   return {
-    uiVersion: 20,
+    uiVersion: 22,
     cachedIn: 0,
     uncachedIn: 0,
     contextTokens: 0,
@@ -178,6 +210,13 @@ async function makeEmptyContextResult() {
     turn0Tokens: 0,
     totalOutputTokens: 0,
     totalThinkingTokens: 0,
+    generationTokens: 0,
+    timeToFirstTokenSeconds: null,
+    streamingSeconds: null,
+    generationSeconds: null,
+    tokensPerSecond: null,
+    streamingTokensPerSecond: null,
+    speedFromPreviousGeneration: false,
     quotaGroups: await fetchQuotaGroups(),
   };
 }
@@ -236,10 +275,16 @@ async function inspectConversation(convId, exact = false) {
 
   const turns = [];
   let maxContextTokens = 0;
+  let latestGeneration = null;
+  let speedGeneration = null;
 
   for (const row of rawRows) {
     const parsed = parseGenRow(row.idx, row.data);
+    latestGeneration = parsed;
     if (!parsed) continue;
+    // A pending request may not have usage yet. Keep the latest reported output
+    // and identify it as a previous generation instead of clearing the reading.
+    if (parsed.generationTokens > 0) speedGeneration = parsed;
     if (parsed.maxContextTokens > 0) {
       maxContextTokens = parsed.maxContextTokens;
     }
@@ -294,7 +339,7 @@ async function inspectConversation(convId, exact = false) {
   const quotaGroups = await fetchQuotaGroups();
 
   return {
-    uiVersion: 20,
+    uiVersion: 22,
     cachedIn: latest.cachedIn,
     uncachedIn: latest.uncachedIn,
     contextTokens: latest.contextTokens,
@@ -303,6 +348,13 @@ async function inspectConversation(convId, exact = false) {
     turn0Tokens,
     totalOutputTokens,
     totalThinkingTokens,
+    generationTokens: speedGeneration?.generationTokens ?? 0,
+    timeToFirstTokenSeconds: speedGeneration?.timeToFirstTokenSeconds ?? null,
+    streamingSeconds: speedGeneration?.streamingSeconds ?? null,
+    generationSeconds: speedGeneration?.generationSeconds ?? null,
+    tokensPerSecond: speedGeneration?.tokensPerSecond ?? null,
+    streamingTokensPerSecond: speedGeneration?.streamingTokensPerSecond ?? null,
+    speedFromPreviousGeneration: !!speedGeneration && speedGeneration !== latestGeneration,
     quotaGroups,
   };
 }
@@ -425,6 +477,21 @@ const UI_HTML = `<!DOCTYPE html>
       background: rgba(142, 142, 147, 0.18);
       margin: 11px 0;
     }
+    .speed-section {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(142, 142, 147, 0.18);
+      color: var(--muted-foreground, #8e8e93);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .speed-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 5px;
+    }
+    .speed-row:first-child { margin-top: 0; }
     .quota-group {
       margin-bottom: 9px;
     }
@@ -520,12 +587,20 @@ const UI_HTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="speed-section" id="speed-section">
+      <div class="speed-row"><span id="speed-label">Overall</span><span id="val-speed">-- tok/s</span></div>
+      <div class="speed-row"><span>Streaming</span><span id="val-stream-speed">-- tok/s</span></div>
+      <div class="speed-row"><span>TTFT</span><span id="val-ttft">-- s</span></div>
+    </div>
+
     <div class="divider"></div>
 
     <div id="quota-root"></div>
   </div>
 
   <script>
+    const speedToView = ${speedToView.toString()};
+
     function fmtK(n) {
       const num = Number(n || 0);
       if (num < 1000) return String(num);
@@ -625,7 +700,7 @@ const UI_HTML = `<!DOCTYPE html>
         const res = await fetch('/api/context' + qStr, { method: 'GET', headers });
         const d = await res.json();
         if (d.error) return;
-        if (d.uiVersion && d.uiVersion !== 20) {
+        if (d.uiVersion && d.uiVersion !== 22) {
           window.location.reload();
           return;
         }
@@ -715,6 +790,12 @@ const UI_HTML = `<!DOCTYPE html>
         document.getElementById('val-think-k').textContent = fmtColK(think);
         document.getElementById('val-out-pct').textContent = outPct;
         document.getElementById('val-out-k').textContent = fmtColK(out);
+
+        const speed = speedToView(d);
+        document.getElementById('val-speed').textContent = speed.speedText;
+        document.getElementById('val-stream-speed').textContent = speed.streamSpeedText;
+        document.getElementById('val-ttft').textContent = speed.ttftText;
+        document.getElementById('speed-label').textContent = speed.speedLabel;
 
         if (d.quotaGroups) {
           renderQuota(d.quotaGroups);
