@@ -20,7 +20,7 @@ Context, quota, and generation speed capsules in the Antigravity composer footer
 - **Cache expiry alerts**: Turn yellow 3 minutes after the last turn with a countdown (`~1m`), and turn red at 4 minutes to mark `Cache` as expired.
 - **Multi-model quota panel**: Automatically match the model selected in the footer (such as `Gemini`, `Claude`, `Argon`, or `Carbon`). Hover to see each group's remaining 5h and weekly quotas, plus reset countdowns.
 - **Responsive narrow layout**: Degrades progressively as the footer narrows (hide speed, then Weekly quota, keep icons with hover popovers, then ellipsis-truncate the model selector) to prevent overlap.
-- **Native styling**: Match the host controls' font, icon size, button height, and theme colors. Left popovers center on their capsule; right popovers expand leftward, with edge avoidance and stable positioning during polling. Keyboard navigation and reduced motion are supported.
+- **Native styling**: Match the host controls' font, icon size, button height, and theme colors, without separators between capsules. Popovers align with their capsule's left edge on the left side and right edge on the right side, with edge avoidance and stable positioning during polling. Keyboard navigation and reduced motion are supported.
 - **Light / dark adaptation & cross-version compatibility**: Reuse the host's CSS variables directly; mount via a native Sidecar and CDP without modifying client source code, so it keeps working after client updates.
 
 ## Installation

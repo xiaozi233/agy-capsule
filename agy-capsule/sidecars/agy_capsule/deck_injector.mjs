@@ -146,10 +146,10 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '54' || rootR.getAttribute('data-deck-ver') !== '54') {
+  if (root.getAttribute('data-deck-ver') !== '55' || rootR.getAttribute('data-deck-ver') !== '55') {
     root._dispose?.();
-    root.setAttribute('data-deck-ver', '54');
-    rootR.setAttribute('data-deck-ver', '54');
+    root.setAttribute('data-deck-ver', '55');
+    rootR.setAttribute('data-deck-ver', '55');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -209,8 +209,7 @@ function pageMount(d) {
         [id^="deck-metrics-strip"] .dk-pill-quota {
           gap: 10px;
         }
-        [id^="deck-metrics-strip"].dk-hide-speed [data-el="grpSpeed"],
-        [id^="deck-metrics-strip"].dk-hide-speed .dk-sep {
+        [id^="deck-metrics-strip"].dk-hide-speed [data-el="grpSpeed"] {
           display: none;
         }
         [id^="deck-metrics-strip"].dk-hide-wk [data-el="pairWk"],
@@ -253,22 +252,8 @@ function pageMount(d) {
         [id^="deck-metrics-strip"].dk-away-ctx [data-el="grpCtx"],
         [id^="deck-metrics-strip"].dk-away-speed [data-el="grpSpeed"],
         [id^="deck-metrics-strip"].dk-away-quota [data-el="grpQuota"],
-        [id^="deck-metrics-strip"].dk-away-quota .dk-sep,
-        [id^="deck-metrics-strip"].dk-nosep .dk-sep,
         [id^="deck-metrics-strip"].dk-empty {
           display: none !important;
-        }
-        /* The separator only earns its place when the quota group is there. */
-        [id^="deck-metrics-strip"].dk-off-quota .dk-sep {
-          display: none;
-        }
-        /* Hairline between the session readouts and the account quota. */
-        [id^="deck-metrics-strip"] .dk-sep {
-          width: 1px;
-          height: 12px;
-          margin: 0 6px;
-          flex-shrink: 0;
-          background: var(--border, rgba(128, 128, 128, 0.28));
         }
         .dk-fl-squeezed {
           min-width: 0 !important;
@@ -632,8 +617,6 @@ function pageMount(d) {
         </div>
       </div>
 
-      <div class="dk-sep"></div>
-
       <!-- Merged Quota Capsule (5h + Weekly) + Popover -->
       <div class="dk-grp" data-el="grpQuota">
         <button type="button" class="dk-pill dk-pill-quota">
@@ -651,9 +634,9 @@ function pageMount(d) {
     `;
 
     // Keep one live node per capsule so moving it preserves listeners and state.
-    // Each strip owns a separator; the shared stylesheet stays in the left strip.
+    // The shared stylesheet stays in the left strip.
     rootR.style.cssText = root.style.cssText;
-    rootR.innerHTML = '<div class="dk-sep"></div>';
+    rootR.innerHTML = '';
     root._capsules = new Map(['context', 'speed', 'quota'].map((key) => [key, root.querySelector('[data-el="' + { context: 'grpCtx', speed: 'grpSpeed', quota: 'grpQuota' }[key] + '"]')]));
 
     const closePopover = () => {
@@ -692,7 +675,7 @@ function pageMount(d) {
       pop.style.setProperty('--dk-enter-y', side === 'top' ? '4px' : '-4px');
       const pw = pop.offsetWidth;
       const ideal = grp.parentElement.dataset.pos === 'right'
-        ? ar.right - pw : ar.left + (ar.width - pw) / 2;
+        ? ar.right - pw : ar.left;
       const left = Math.max(minLeft, Math.min(ideal, maxRight - pw));
       pop.style.left = left - ar.left + 'px';
     };
@@ -771,15 +754,11 @@ function pageMount(d) {
   const sideFor = (key) => key === 'context' ? pos.ctx : pos[key];
   for (const [strip, side] of [[root, 'left'], [rootR, 'right']]) {
     const groups = order.filter(key => sideFor(key) === side).map(key => root._capsules.get(key));
-    const separator = strip.querySelector('.dk-sep');
     // Reconcile only changed slots; unchanged telemetry updates never move DOM.
     groups.forEach((grp, index) => {
       const current = Array.from(strip.children).filter(el => el.classList.contains('dk-grp'));
       if (current[index] !== grp) strip.insertBefore(grp, current[index] || null);
     });
-    const quotaIndex = groups.indexOf(root._capsules.get('quota'));
-    const following = quotaIndex === 0 ? groups[1] : groups[quotaIndex];
-    if (following && separator.nextElementSibling !== following) strip.insertBefore(separator, following);
   }
 
   for (const el of [root, rootR]) {
@@ -836,8 +815,6 @@ function pageMount(d) {
       strip.classList.toggle('dk-away-' + key, away);
       if (!away) shown++;
     }
-    const hasReadout = (onCtx && pos.ctx === mine) || (onSpeed && pos.speed === mine);
-    strip.classList.toggle('dk-nosep', !hasReadout || pos.quota !== mine || (!on5h && !onWk));
     strip.classList.toggle('dk-empty', shown === 0);
   }
   dock.classList.toggle('dk-dock-empty', !onCtx && !onSpeed && !on5h && !onWk);
