@@ -99,8 +99,8 @@ function pageMount(d) {
   }
 
   // Upgrade or initialize DOM structure in-place
-  if (root.getAttribute('data-deck-ver') !== '42') {
-    root.setAttribute('data-deck-ver', '42');
+  if (root.getAttribute('data-deck-ver') !== '43') {
+    root.setAttribute('data-deck-ver', '43');
     root.style.cssText = [
       'display: inline-flex',
       'align-items: center',
@@ -150,6 +150,7 @@ function pageMount(d) {
         #deck-metrics-strip .dk-grp:hover .dk-svg {
           color: var(--foreground, #0a0a0c);
         }
+        #deck-metrics-strip .dk-pill-context,
         #deck-metrics-strip .dk-pill-quota {
           gap: 10px;
         }
@@ -207,6 +208,7 @@ function pageMount(d) {
         .dk-model-squeezed svg {
           flex-shrink: 0 !important;
         }
+        #deck-metrics-strip .dk-ctx-pair,
         #deck-metrics-strip .dk-q-pair {
           display: inline-flex;
           align-items: center;
@@ -430,12 +432,15 @@ function pageMount(d) {
 
       <!-- Context Capsule + Popover -->
       <div class="dk-grp" data-el="grpCtx">
-        <div class="dk-pill">
-          <svg class="dk-svg" data-el="ctxIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
-          <span class="dk-val" data-k="pillCtx">--%</span>
-        </div>
-        <div class="dk-pill" data-el="speedPill">
-          <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
+        <div class="dk-pill dk-pill-context">
+          <span class="dk-ctx-pair">
+            <svg class="dk-svg" data-el="ctxIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+            <span class="dk-val" data-k="pillCtx">--%</span>
+          </span>
+          <span class="dk-ctx-pair" data-el="speedPill">
+            <svg class="dk-svg" data-el="speedIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span class="dk-val" data-k="pillSpeed">-- tok/s</span>
+          </span>
         </div>
         <div class="dk-pop dk-ctx-pop">
           <div class="dk-cache-bar" data-el="rowCacheHit">
